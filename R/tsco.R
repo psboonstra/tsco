@@ -26,8 +26,13 @@
 #'   Either "po" for proportional odds or "multinomial".
 #' @param stage2 Model for the collapsed marginal outcome \{Y < C, C, ..., K - 1\}.
 #'   Either "multinomial" or "po".
-#' @param po.reverse Logical. Passed to VGAM::cumulative(reverse = ...).
-#'   The default TRUE matches the manuscript's parameterization of Pr(Y >= k | X).
+#' @param po.reverse Logical. Passed to `VGAM::cumulative(reverse = ...)`.
+#'   The default `FALSE` makes VGAM model lower cumulative probabilities,
+#'   e.g. `Pr(Y < k | X)`, so that the fitted slope coefficients have the same
+#'   sign as the manuscript parameterization
+#'   `Pr(Y >= k | X) = expit(alpha_k - x' beta)`. If `TRUE`, VGAM models
+#'   reverse cumulative probabilities and the slope coefficients are the
+#'   negatives of the manuscript's beta parameters.
 #' @param weights Optional numeric case weights.
 #' @param na.action Missing-data action passed to model.frame().
 #' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary regressions.
@@ -42,7 +47,7 @@ tsco <- function(
     levels = NULL,
     stage1 = c("po", "multinomial"),
     stage2 = c("multinomial", "po"),
-    po.reverse = TRUE,
+    po.reverse = FALSE,
     weights = NULL,
     na.action = stats::na.omit,
     warn_degenerate = TRUE,
@@ -495,6 +500,7 @@ tsco <- function(
     grouped = is_grouped,
     fit_stage1 = fit1,
     fit_stage2 = fit2,
+    predict_data = d2,
     # sample-size accounting
     n = n_obs,
     n_obs = n_obs,
