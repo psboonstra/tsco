@@ -1,13 +1,21 @@
 Package: tsco
-Title: What the Package Does (One Line, Title Case)
+Title: Fit two-stage conditional odds models 
 Version: 0.0.0.9000
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Philip", "Boonstra", , "phil@umich.edu", role = c("aut", "cre"))
+Description: This package implements the two-stage conditional odds (tsco) models of Boonstra, et al. (2026)
+License: CC BY 4.0
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
 URL: https://github.com/psboonstra/tsco
 BugReports: https://github.com/psboonstra/tsco/issues
+Imports: 
+    methods,
+    stats,
+    VGAM
+Suggests: 
+    dplyr,
+    testthat (>= 3.0.0),
+    tidyr
+Config/testthat/edition: 3
