@@ -14,6 +14,7 @@ tsco(
   po.reverse = TRUE,
   weights = NULL,
   na.action = stats::na.omit,
+  warn_degenerate = TRUE,
   ...
 )
 }
@@ -26,10 +27,12 @@ cbind(y0, y1, y2) ~ x1 + x2 for grouped count data.}
 \item{cutoff_level}{The first outcome level in the upper partition, supplied
 as a level label.}
 
-\item{levels}{Optional character vector specifying the outcome levels. For
-grouped count data, this must correspond to the column order of the cbind()
-response. If NULL, ordered factor levels or response matrix column names
-are used when available.}
+\item{levels}{Optional character vector specifying the ordinal outcome level
+order. For individual-level data, observed outcome values must be contained
+in \code{levels}. For grouped count data with named cbind() columns, \code{levels}
+must contain exactly the response column names and is used to reorder the
+columns into ordinal order. For grouped count data without column names,
+\code{levels} is assumed to describe the existing cbind() column order.}
 
 \item{stage1}{Model for the conditional lower partition Y | Y < C.
 Either "po" for proportional odds or "multinomial".}
@@ -43,6 +46,8 @@ The default TRUE matches the manuscript's parameterization of Pr(Y >= k | X).}
 \item{weights}{Optional numeric case weights.}
 
 \item{na.action}{Missing-data action passed to model.frame().}
+
+\item{warn_degenerate}{If TRUE, warn when K = 3, which reduces to two binary regressions.}
 
 \item{...}{Additional arguments passed to VGAM::vglm().}
 }

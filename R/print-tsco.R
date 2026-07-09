@@ -3,6 +3,7 @@
 #' @param x An object of class `"tsco"`.
 #' @param ... Ignored.
 #'
+#' @method print tsco
 #' @export
 print.tsco <- function(x, ...) {
   cat("Two-Stage Conditional Odds Model\n")

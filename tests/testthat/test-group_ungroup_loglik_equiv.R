@@ -1,4 +1,4 @@
-test_that("grouped and ungrouped fits agree when levels reorder grouped columns", {
+test_that("grouped and ungrouped TSCO log-likelihoods agree", {
   skip_if_not_installed("VGAM")
   skip_if_not_installed("dplyr")
   skip_if_not_installed("tidyr")
@@ -40,14 +40,32 @@ test_that("grouped and ungrouped fits agree when levels reorder grouped columns"
   )
 
   expect_equal(
-    unname(stats::coef(fit_grouped$fit_stage1)),
-    unname(stats::coef(fit_ungrouped$fit_stage1)),
+    fit_grouped$logLik_stage1,
+    fit_ungrouped$logLik_stage1,
     tolerance = 1e-7
   )
 
   expect_equal(
-    unname(stats::coef(fit_grouped$fit_stage2)),
-    unname(stats::coef(fit_ungrouped$fit_stage2)),
+    fit_grouped$logLik_stage2,
+    fit_ungrouped$logLik_stage2,
     tolerance = 1e-7
+  )
+
+  expect_equal(
+    fit_grouped$logLik,
+    fit_ungrouped$logLik,
+    tolerance = 1e-7
+  )
+
+  expect_equal(
+    as.numeric(logLik(fit_grouped)),
+    as.numeric(logLik(fit_ungrouped)),
+    tolerance = 1e-7
+  )
+
+  expect_equal(
+    as.numeric(logLik(fit_grouped)),
+    fit_grouped$logLik,
+    tolerance = 1e-12
   )
 })

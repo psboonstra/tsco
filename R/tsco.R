@@ -16,10 +16,12 @@
 #' @param data A data.frame.
 #' @param cutoff_level The first outcome level in the upper partition, supplied
 #'   as a level label.
-#' @param levels Optional character vector specifying the outcome levels. For
-#'   grouped count data, this must correspond to the column order of the cbind()
-#'   response. If NULL, ordered factor levels or response matrix column names
-#'   are used when available.
+#' @param levels Optional character vector specifying the ordinal outcome level
+#'   order. For individual-level data, observed outcome values must be contained
+#'   in `levels`. For grouped count data with named cbind() columns, `levels`
+#'   must contain exactly the response column names and is used to reorder the
+#'   columns into ordinal order. For grouped count data without column names,
+#'   `levels` is assumed to describe the existing cbind() column order.
 #' @param stage1 Model for the conditional lower partition Y | Y < C.
 #'   Either "po" for proportional odds or "multinomial".
 #' @param stage2 Model for the collapsed marginal outcome {Y < C, C, ..., K - 1}.
@@ -28,6 +30,7 @@
 #'   The default TRUE matches the manuscript's parameterization of Pr(Y >= k | X).
 #' @param weights Optional numeric case weights.
 #' @param na.action Missing-data action passed to model.frame().
+#' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary regressions.
 #' @param ... Additional arguments passed to VGAM::vglm().
 #'
 #' @return An object of class "tsco".
@@ -42,6 +45,7 @@ tsco <- function(
     po.reverse = TRUE,
     weights = NULL,
     na.action = stats::na.omit,
+    warn_degenerate = TRUE,
     ...) {
 
   if (!requireNamespace("VGAM", quietly = TRUE)) {
@@ -110,6 +114,10 @@ tsco <- function(
 
     if (any(y_mat < 0)) {
       stop("Grouped/count response counts must be nonnegative.", call. = FALSE)
+    }
+
+    if (any(abs(y_mat - round(y_mat)) > sqrt(.Machine$double.eps))) {
+      warning("Non-integer grouped/count response counts detected.", call. = FALSE)
     }
 
     if (any(rowSums(y_mat) <= 0)) {
@@ -205,6 +213,10 @@ tsco <- function(
     }
   }
 
+  if (anyDuplicated(y_levels)) {
+    stop("`levels` must not contain duplicate values.", call. = FALSE)
+  }
+
   K <- length(y_levels)
 
   if (K < 3L) {
@@ -214,7 +226,7 @@ tsco <- function(
     )
   }
 
-  if (K == 3L) {
+  if (K == 3L && isTRUE(warn_degenerate)) {
     warning(
       "With K = 3, TSCO reduces to two binary regressions; ",
       "the PO and multinomial choices are equivalent within each stage.",

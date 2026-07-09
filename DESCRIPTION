@@ -1,15 +1,19 @@
 Package: tsco
-Title: Fit two-stage conditional odds models 
+Title: Two-Stage Conditional Odds Models 
 Version: 0.0.0.9000
 Authors@R: 
-    person("Philip", "Boonstra", , "phil@umich.edu", role = c("aut", "cre"))
-Description: This package implements the two-stage conditional odds (tsco) models of Boonstra, et al. (2026)
-License: CC BY 4.0
+    person(given = "Philip S.", family = "Boonstra", email = "phil@umich.edu", role = c("aut", "cre"))
+Description: Implements two-stage conditional odds (TSCO) models for
+    ordinal outcomes using VGAM. Supports individual-level ordinal responses
+    and grouped count responses.
+License: GPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 8.0.0
 URL: https://github.com/psboonstra/tsco
 BugReports: https://github.com/psboonstra/tsco/issues
+Depends:
+    R (>= 4.1.0)
 Imports: 
     methods,
     stats,

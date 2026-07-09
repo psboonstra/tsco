@@ -1,4 +1,4 @@
-test_that("grouped and ungrouped fits agree when levels reorder grouped columns", {
+test_that("AIC and BIC are consistent across methods and data representations", {
   skip_if_not_installed("VGAM")
   skip_if_not_installed("dplyr")
   skip_if_not_installed("tidyr")
@@ -18,8 +18,6 @@ test_that("grouped and ungrouped fits agree when levels reorder grouped columns"
     )
 
   fit_grouped <- tsco(
-    # Columns are deliberately not in ordinal order. Supplying `levels`
-    # should cause tsco() to reorder grouped counts before fitting.
     cbind(normal, mild, severe) ~ let,
     data = pneumo,
     levels = c("mild", "normal", "severe"),
@@ -39,15 +37,42 @@ test_that("grouped and ungrouped fits agree when levels reorder grouped columns"
     warn_degenerate = FALSE
   )
 
+  s_grouped <- summary(fit_grouped)
+  s_ungrouped <- summary(fit_ungrouped)
+
   expect_equal(
-    unname(stats::coef(fit_grouped$fit_stage1)),
-    unname(stats::coef(fit_ungrouped$fit_stage1)),
+    as.numeric(stats::AIC(fit_grouped)),
+    s_grouped$total_fit$AIC,
+    tolerance = 1e-8
+  )
+
+  expect_equal(
+    as.numeric(stats::BIC(fit_grouped)),
+    s_grouped$total_fit$BIC,
+    tolerance = 1e-8
+  )
+
+  expect_equal(
+    as.numeric(stats::AIC(fit_grouped)),
+    as.numeric(stats::AIC(fit_ungrouped)),
     tolerance = 1e-7
   )
 
   expect_equal(
-    unname(stats::coef(fit_grouped$fit_stage2)),
-    unname(stats::coef(fit_ungrouped$fit_stage2)),
+    as.numeric(stats::BIC(fit_grouped)),
+    as.numeric(stats::BIC(fit_ungrouped)),
+    tolerance = 1e-7
+  )
+
+  expect_equal(
+    s_grouped$total_fit$AIC,
+    s_ungrouped$total_fit$AIC,
+    tolerance = 1e-7
+  )
+
+  expect_equal(
+    s_grouped$total_fit$BIC,
+    s_ungrouped$total_fit$BIC,
     tolerance = 1e-7
   )
 })
