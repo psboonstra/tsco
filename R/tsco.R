@@ -24,7 +24,7 @@
 #'   `levels` is assumed to describe the existing cbind() column order.
 #' @param stage1 Model for the conditional lower partition Y | Y < C.
 #'   Either "po" for proportional odds or "multinomial".
-#' @param stage2 Model for the collapsed marginal outcome {Y < C, C, ..., K - 1}.
+#' @param stage2 Model for the collapsed marginal outcome \{Y < C, C, ..., K - 1\}.
 #'   Either "multinomial" or "po".
 #' @param po.reverse Logical. Passed to VGAM::cumulative(reverse = ...).
 #'   The default TRUE matches the manuscript's parameterization of Pr(Y >= k | X).

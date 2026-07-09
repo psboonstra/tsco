@@ -37,7 +37,7 @@ columns into ordinal order. For grouped count data without column names,
 \item{stage1}{Model for the conditional lower partition Y | Y < C.
 Either "po" for proportional odds or "multinomial".}
 
-\item{stage2}{Model for the collapsed marginal outcome {Y < C, C, ..., K - 1}.
+\item{stage2}{Model for the collapsed marginal outcome \{Y < C, C, ..., K - 1\}.
 Either "multinomial" or "po".}
 
 \item{po.reverse}{Logical. Passed to VGAM::cumulative(reverse = ...).
