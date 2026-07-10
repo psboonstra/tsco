@@ -1,5 +1,12 @@
 #' Variance-covariance matrix for a TSCO model
 #'
+#' Reported on the same sign-corrected scale as `coef.tsco()`. If a stage's
+#' coefficients required a sign flip to match the manuscript's
+#' parameterization (see `.tsco_sign_vector()`), the covariance matrix is
+#' transformed as `V_new = D V_old D`, where `D` is the diagonal +-1 sign
+#' matrix -- not simply negated -- so that cross terms between flipped and
+#' unflipped coefficients (e.g. an intercept and a slope) remain correct.
+#'
 #' @param object An object of class `"tsco"`.
 #' @param stage Which stage to extract: `"both"`, `"stage1"`, or `"stage2"`.
 #' @param ... Ignored.
@@ -15,6 +22,16 @@ vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
 
   V1 <- as.matrix(stats::vcov(object$fit_stage1))
   V2 <- as.matrix(stats::vcov(object$fit_stage2))
+
+  s1 <- .tsco_sign_vector(object$fit_stage1, object$stage1)
+  s2 <- .tsco_sign_vector(object$fit_stage2, object$stage2)
+
+  # V_new = D %*% V_old %*% D, with D = diag(s). Implemented via outer
+  # product on the sign vector rather than an explicit diagonal matrix
+  # multiply, which is equivalent and avoids forming two extra p x p
+  # matrices per stage.
+  V1 <- V1 * outer(s1, s1)
+  V2 <- V2 * outer(s2, s2)
 
   if (stage == "stage1") {
     return(V1)

@@ -1,4 +1,3 @@
-
 #' Summarize a TSCO model
 #'
 #' Produces a concise statistical summary of both fitted TSCO stages.
@@ -11,8 +10,8 @@
 #' @method summary tsco
 #' @export
 summary.tsco <- function(object, ...) {
-  coef_stage1 <- .tsco_coef_table(object$fit_stage1)
-  coef_stage2 <- .tsco_coef_table(object$fit_stage2)
+  coef_stage1 <- .tsco_coef_table(object$fit_stage1, object$stage1)
+  coef_stage2 <- .tsco_coef_table(object$fit_stage2, object$stage2)
 
   ll1 <- as.numeric(object$logLik_stage1)
   ll2 <- as.numeric(object$logLik_stage2)

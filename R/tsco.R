@@ -26,13 +26,14 @@
 #'   Either "po" for proportional odds or "multinomial".
 #' @param stage2 Model for the collapsed marginal outcome \{Y < C, C, ..., K - 1\}.
 #'   Either "multinomial" or "po".
-#' @param po.reverse Logical. Passed to `VGAM::cumulative(reverse = ...)`.
-#'   The default `FALSE` makes VGAM model lower cumulative probabilities,
-#'   e.g. `Pr(Y < k | X)`, so that the fitted slope coefficients have the same
-#'   sign as the manuscript parameterization
-#'   `Pr(Y >= k | X) = expit(alpha_k - x' beta)`. If `TRUE`, VGAM models
-#'   reverse cumulative probabilities and the slope coefficients are the
-#'   negatives of the manuscript's beta parameters.
+#' @param po.reverse Logical. Passed to VGAM::cumulative(reverse = ...).
+#'   The default FALSE matches the manuscript's parameterization,
+#'   Pr(Y >= k | X) = expit(alpha_k - x'beta): under VGAM's convention,
+#'   reverse = FALSE models Pr(Y <= j) = expit(alpha_j + x'beta), which is
+#'   algebraically equivalent to Pr(Y >= j+1) = expit(-alpha_j - x'beta),
+#'   giving the correct sign on x'beta once cutpoints are relabeled.
+#'   reverse = TRUE would instead return the negative of the manuscript's
+#'   beta for every PO-family stage.
 #' @param weights Optional numeric case weights.
 #' @param na.action Missing-data action passed to model.frame().
 #' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary regressions.
@@ -460,8 +461,8 @@ tsco <- function(
     ...
   )
 
-  p1_hat <- stats::predict(fit1, type = "response")
-  p2_hat <- stats::predict(fit2, type = "response")
+  p1_hat <- VGAM::predictvglm(fit1, type = "response")
+  p2_hat <- VGAM::predictvglm(fit2, type = "response")
 
   p1_hat <- .tsco_align_prob(p1_hat, lower_levels)
   p2_hat <- .tsco_align_prob(p2_hat, collapsed_levels)
@@ -500,7 +501,6 @@ tsco <- function(
     grouped = is_grouped,
     fit_stage1 = fit1,
     fit_stage2 = fit2,
-    predict_data = d2,
     # sample-size accounting
     n = n_obs,
     n_obs = n_obs,

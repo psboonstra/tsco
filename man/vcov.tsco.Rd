@@ -19,5 +19,10 @@ matrix is block diagonal with stage-specific coefficient names prefixed by
 \code{"stage1:"} and \code{"stage2:"}.
 }
 \description{
-Variance-covariance matrix for a TSCO model
+Reported on the same sign-corrected scale as \code{coef.tsco()}. If a stage's
+coefficients required a sign flip to match the manuscript's
+parameterization (see \code{.tsco_sign_vector()}), the covariance matrix is
+transformed as \verb{V_new = D V_old D}, where \code{D} is the diagonal +-1 sign
+matrix -- not simply negated -- so that cross terms between flipped and
+unflipped coefficients (e.g. an intercept and a slope) remain correct.
 }

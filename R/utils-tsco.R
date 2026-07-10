@@ -16,44 +16,83 @@
   length(cf)
 }
 
-.tsco_coef_table <- function(fit) {
+#' Extract a stage's coefficient table, sign-corrected to match
+#' coef.tsco()/vcov.tsco().
+#'
+#' `Estimate` and any test-statistic column built by dividing the estimate
+#' by its (sign-invariant) standard error -- e.g. `z value`, `t value` --
+#' are flipped for non-intercept rows when `kind == "multinomial"`.
+#' `Std. Error` and p-value columns are unaffected, since neither depends
+#' on the sign of the estimate.
+#'
+#' @param fit A fitted stage model (a "vglm" object).
+#' @param kind "po" or "multinomial", i.e. object$stage1 or object$stage2.
+.tsco_coef_table <- function(fit, kind) {
+  ct <- NULL
+
   s <- tryCatch(summary(fit), error = function(e) NULL)
 
   if (!is.null(s)) {
     ct <- tryCatch(stats::coef(s), error = function(e) NULL)
 
-    if (is.matrix(ct) || is.data.frame(ct)) {
-      return(as.matrix(ct))
-    }
+    if (!(is.matrix(ct) || is.data.frame(ct))) {
+      ct <- NULL
 
-    # VGAM summary objects are commonly S4. Try common slots if coef() failed.
-    if (methods::is(s, "summaryvglm")) {
-      sn <- methods::slotNames(s)
+      # VGAM summary objects are commonly S4. Try common slots if coef() failed.
+      if (methods::is(s, "summaryvglm")) {
+        sn <- methods::slotNames(s)
 
-      for (slot_name in c("coef3", "coef4", "coeftable")) {
-        if (slot_name %in% sn) {
-          ct <- tryCatch(methods::slot(s, slot_name), error = function(e) NULL)
+        for (slot_name in c("coef3", "coef4", "coeftable")) {
+          if (slot_name %in% sn) {
+            cand <- tryCatch(methods::slot(s, slot_name), error = function(e) NULL)
 
-          if (is.matrix(ct) || is.data.frame(ct)) {
-            return(as.matrix(ct))
+            if (is.matrix(cand) || is.data.frame(cand)) {
+              ct <- cand
+              break
+            }
           }
         }
       }
     }
   }
 
-  # Fallback: estimates only.
-  cf <- tryCatch(stats::coef(fit), error = function(e) NULL)
+  if (is.null(ct)) {
+    # Fallback: estimates only.
+    cf <- tryCatch(stats::coef(fit), error = function(e) NULL)
 
-  if (is.null(cf)) {
-    return(matrix(numeric(0), nrow = 0L, ncol = 0L))
+    if (is.null(cf)) {
+      return(matrix(numeric(0), nrow = 0L, ncol = 0L))
+    }
+
+    ct <- matrix(
+      cf,
+      ncol = 1L,
+      dimnames = list(names(cf), "Estimate")
+    )
+  } else {
+    ct <- as.matrix(ct)
   }
 
-  matrix(
-    cf,
-    ncol = 1L,
-    dimnames = list(names(cf), "Estimate")
-  )
+  if (identical(kind, "multinomial") && nrow(ct) > 0L) {
+    is_intercept <- grepl("(Intercept)", rownames(ct), fixed = TRUE)
+    flip_rows <- !is_intercept
+
+    if (any(flip_rows)) {
+      cn <- colnames(ct)
+      # "Estimate" and any column that is estimate-scaled (test statistics
+      # such as "z value"/"t value") flip sign; "Std. Error" and p-value
+      # columns do not.
+      flip_cols <- grepl(
+        "^Estimate$|z value|t value|Wald",
+        cn,
+        ignore.case = TRUE
+      )
+
+      ct[flip_rows, flip_cols] <- -ct[flip_rows, flip_cols]
+    }
+  }
+
+  ct
 }
 
 .tsco_model_label <- function(x) {
@@ -140,6 +179,49 @@
 
   out[cbind(seq_along(y_chr), idx)] <- 1
   out
+}
+
+#' Sign vector correcting a fitted stage's coefficients to the manuscript's
+#' parameterization.
+#'
+#' The manuscript parameterizes both submodels with a subtractive
+#' convention on x'beta (Eq. 1 for PO, Eq. 2 for MR/multinomial). As
+#' actually called by tsco()'s make_family():
+#'   - "po" (VGAM::cumulative(reverse = po.reverse)): with
+#'     po.reverse = FALSE (the package default as of this fix), VGAM's
+#'     Pr(Y <= j) = expit(alpha_j + x'beta) is algebraically equivalent to
+#'     Pr(Y >= j+1) = expit(-alpha_j - x'beta), which already matches the
+#'     manuscript's sign on x'beta once cutpoints are relabeled. No flip
+#'     needed. (Confirmed by simulation in test-sign_recovery_simulation.R;
+#'     if po.reverse is ever changed back to TRUE, this would need to
+#'     change too.)
+#'   - "multinomial" (VGAM::multinomial(refLevel = 1)): uses the standard
+#'     additive multinomial-logit convention, eta = alpha + x'beta, which
+#'     is the *opposite* sign of the manuscript's Eq. 2. Confirmed by
+#'     simulation in test-multinomial_sign_recovery.R (recovered
+#'     coefficient was the negative of the true simulated value). Every
+#'     non-intercept coefficient needs flipping.
+#'
+#' This helper is the single point of control for that correction so that,
+#' if make_family()'s arguments ever change, there is one place to update
+#' the sign logic rather than several call sites (coef.tsco, vcov.tsco,
+#' summary.tsco).
+#'
+#' @param fit A fitted stage model (a "vglm" object).
+#' @param kind "po" or "multinomial", i.e. object$stage1 or object$stage2.
+#' @return A named numeric vector of +1/-1, same length and names as
+#'   stats::coef(fit).
+.tsco_sign_vector <- function(fit, kind) {
+  cf <- stats::coef(fit)
+  s <- rep(1, length(cf))
+  names(s) <- names(cf)
+
+  if (identical(kind, "multinomial")) {
+    is_intercept <- grepl("(Intercept)", names(cf), fixed = TRUE)
+    s[!is_intercept] <- -1
+  }
+
+  s
 }
 
 .tsco_align_prob <- function(p, levels) {

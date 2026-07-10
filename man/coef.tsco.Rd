@@ -18,5 +18,9 @@ A named numeric vector of coefficients. If \code{stage = "both"},
 coefficient names are prefixed by \code{"stage1:"} and \code{"stage2:"}.
 }
 \description{
-Extract coefficients from a TSCO model
+Coefficients are reported in the manuscript's parameterization
+(Pr(Y >= k | X) = expit(alpha_k - x'beta) for PO stages;
+Pr(Y = k | X) ~ exp(alpha_k - x'beta_k) for multinomial stages), which
+may require sign-correcting the raw VGAM fit's coefficients; see
+\code{.tsco_sign_vector()} for the derivation.
 }

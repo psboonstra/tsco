@@ -11,7 +11,7 @@ tsco(
   levels = NULL,
   stage1 = c("po", "multinomial"),
   stage2 = c("multinomial", "po"),
-  po.reverse = TRUE,
+  po.reverse = FALSE,
   weights = NULL,
   na.action = stats::na.omit,
   warn_degenerate = TRUE,
@@ -41,7 +41,13 @@ Either "po" for proportional odds or "multinomial".}
 Either "multinomial" or "po".}
 
 \item{po.reverse}{Logical. Passed to VGAM::cumulative(reverse = ...).
-The default TRUE matches the manuscript's parameterization of Pr(Y >= k | X).}
+The default FALSE matches the manuscript's parameterization,
+Pr(Y >= k | X) = expit(alpha_k - x'beta): under VGAM's convention,
+reverse = FALSE models Pr(Y <= j) = expit(alpha_j + x'beta), which is
+algebraically equivalent to Pr(Y >= j+1) = expit(-alpha_j - x'beta),
+giving the correct sign on x'beta once cutpoints are relabeled.
+reverse = TRUE would instead return the negative of the manuscript's
+beta for every PO-family stage.}
 
 \item{weights}{Optional numeric case weights.}
 
