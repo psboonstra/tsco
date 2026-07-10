@@ -5,15 +5,67 @@
 \alias{tsco-package}
 \title{tsco: Two-Stage Conditional Odds Models}
 \description{
-Implements two-stage conditional odds (TSCO) models for ordinal outcomes using VGAM. Supports individual-level ordinal responses and grouped count responses.
+The \code{tsco} package fits two-stage conditional odds (TSCO) models for
+ordinal outcomes. TSCO models partition an ordinal response at a chosen
+cutoff level and fit two component models:
 }
-\seealso{
-Useful links:
+\details{
 \itemize{
-  \item \url{https://github.com/psboonstra/tsco}
-  \item Report bugs at \url{https://github.com/psboonstra/tsco/issues}
+\item a conditional model for the lower partition, \code{Y | Y < C};
+\item a marginal model for the collapsed outcome \verb{\{Y < C, C, ..., K - 1\}}.
 }
 
+The package currently uses \code{VGAM::vglm()} to fit the component models.
+Each component may be specified as a proportional odds model or a
+multinomial model.
+}
+\section{Main function}{
+
+
+The primary user-facing function is \code{\link[=tsco]{tsco()}}, which fits a TSCO model.
+}
+
+\section{Supported response formats}{
+
+
+\code{tsco()} supports both individual-level ordinal outcomes, for example
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{y ~ x1 + x2
+}\if{html}{\out{</div>}}
+
+and grouped count outcomes, for example
+
+\if{html}{\out{<div class="sourceCode">}}\preformatted{cbind(y0, y1, y2) ~ x1 + x2
+}\if{html}{\out{</div>}}
+
+For grouped count responses, the optional \code{levels} argument can be used to
+specify the ordinal ordering of the response categories.
+}
+
+\section{Model variants}{
+
+
+The arguments \code{stage1} and \code{stage2} determine the two component model types.
+Current options are:
+\itemize{
+\item \code{"po"}: proportional odds;
+\item \code{"multinomial"}: multinomial baseline-category logit.
+}
+
+For example, \code{stage1 = "po"} and \code{stage2 = "multinomial"} fits a
+\code{PO | C | MR} TSCO model.
+}
+
+\section{Package conventions}{
+
+
+The package reports TSCO log-likelihoods on a constant-free individual-level
+scale. This makes grouped and ungrouped representations of the same data
+comparable.
+}
+
+\seealso{
+\code{\link[=tsco]{tsco()}}, \code{\link[=summary.tsco]{summary.tsco()}}, \code{\link[=predict.tsco]{predict.tsco()}}
 }
 \author{
 \strong{Maintainer}: Philip S. Boonstra \email{phil@umich.edu}
