@@ -10,8 +10,19 @@
 #' @method summary tsco
 #' @export
 summary.tsco <- function(object, ...) {
-  coef_stage1 <- .tsco_coef_table(object$fit_stage1, object$stage1)
-  coef_stage2 <- .tsco_coef_table(object$fit_stage2, object$stage2)
+  coef_stage1 <- .tsco_coef_table(
+    object$fit_stage1,
+    kind = object$stage1,
+    po.reverse = object$po.reverse
+  )
+
+  coef_stage2 <- .tsco_coef_table(
+    object$fit_stage2,
+    kind = object$stage2,
+    po.reverse = object$po.reverse
+  )
+
+  joint_tests <- .tsco_joint_wald_tests(object)
 
   ll1 <- as.numeric(object$logLik_stage1)
   ll2 <- as.numeric(object$logLik_stage2)
@@ -97,6 +108,7 @@ summary.tsco <- function(object, ...) {
       AIC = total_AIC,
       BIC = total_BIC
     ),
+    joint_tests = joint_tests,
     coef_stage1 = coef_stage1,
     coef_stage2 = coef_stage2
   )
@@ -182,6 +194,23 @@ print.summary.tsco <- function(
     }
   }
   print(total_print, row.names = FALSE, right = FALSE)
+
+  cat("\nJoint Wald tests across stages:\n")
+  cat("  H0: all stage-specific coefficients for the term are zero\n")
+
+  if (is.null(x$joint_tests) || nrow(x$joint_tests) == 0L) {
+    cat("  No joint tests available.\n")
+  } else {
+    stats::printCoefmat(
+      as.matrix(x$joint_tests),
+      digits = digits,
+      signif.stars = signif.stars,
+      na.print = "NA",
+      has.Pvalue = TRUE,
+      P.values = TRUE,
+      ...
+    )
+  }
 
   cat("\nStage 1 coefficients: ")
   cat("Y | Y < ", x$cutoff_level, "\n", sep = "")

@@ -10,18 +10,32 @@
 #' @param stage Which stage to extract: `"both"`, `"stage1"`, or `"stage2"`.
 #' @param ... Ignored.
 #'
-#' @return A named numeric vector of coefficients. If `stage = "both"`,
-#'   coefficient names are prefixed by `"stage1:"` and `"stage2:"`.
+#' @return A named numeric vector of coefficients on the TSCO/manuscript scale.
+#'   If `stage = "both"`, coefficient names are prefixed by `"stage1:"` and
+#'   `"stage2:"`.
 #'
 #' @method coef tsco
 #' @export
 coef.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   stage <- match.arg(stage)
 
-  b1 <- stats::coef(object$fit_stage1) *
-    .tsco_sign_vector(object$fit_stage1, object$stage1)
-  b2 <- stats::coef(object$fit_stage2) *
-    .tsco_sign_vector(object$fit_stage2, object$stage2)
+  b1_raw <- stats::coef(object$fit_stage1)
+  b2_raw <- stats::coef(object$fit_stage2)
+
+  s1 <- .tsco_sign_vector(
+    object$fit_stage1,
+    kind = object$stage1,
+    po.reverse = object$po.reverse
+  )
+
+  s2 <- .tsco_sign_vector(
+    object$fit_stage2,
+    kind = object$stage2,
+    po.reverse = object$po.reverse
+  )
+
+  b1 <- b1_raw * s1
+  b2 <- b2_raw * s2
 
   if (stage == "stage1") {
     return(b1)

@@ -11,27 +11,40 @@
 #' @param stage Which stage to extract: `"both"`, `"stage1"`, or `"stage2"`.
 #' @param ... Ignored.
 #'
-#' @return A variance-covariance matrix. If `stage = "both"`, the returned
-#'   matrix is block diagonal with stage-specific coefficient names prefixed by
-#'   `"stage1:"` and `"stage2:"`.
+#' @return A variance-covariance matrix on the TSCO/manuscript coefficient
+#'   scale. If `stage = "both"`, the returned matrix is block diagonal.
 #'
 #' @method vcov tsco
 #' @export
 vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   stage <- match.arg(stage)
 
-  V1 <- as.matrix(stats::vcov(object$fit_stage1))
-  V2 <- as.matrix(stats::vcov(object$fit_stage2))
+  V1_raw <- as.matrix(stats::vcov(object$fit_stage1))
+  V2_raw <- as.matrix(stats::vcov(object$fit_stage2))
 
-  s1 <- .tsco_sign_vector(object$fit_stage1, object$stage1)
-  s2 <- .tsco_sign_vector(object$fit_stage2, object$stage2)
+  s1 <- .tsco_sign_vector(
+    object$fit_stage1,
+    kind = object$stage1,
+    po.reverse = object$po.reverse
+  )
 
-  # V_new = D %*% V_old %*% D, with D = diag(s). Implemented via outer
-  # product on the sign vector rather than an explicit diagonal matrix
-  # multiply, which is equivalent and avoids forming two extra p x p
-  # matrices per stage.
-  V1 <- V1 * outer(s1, s1)
-  V2 <- V2 * outer(s2, s2)
+  s2 <- .tsco_sign_vector(
+    object$fit_stage2,
+    kind = object$stage2,
+    po.reverse = object$po.reverse
+  )
+
+  # Align sign vectors to covariance matrix names when possible.
+  if (!is.null(rownames(V1_raw))) {
+    s1 <- s1[rownames(V1_raw)]
+  }
+
+  if (!is.null(rownames(V2_raw))) {
+    s2 <- s2[rownames(V2_raw)]
+  }
+
+  V1 <- V1_raw * outer(s1, s1)
+  V2 <- V2_raw * outer(s2, s2)
 
   if (stage == "stage1") {
     return(V1)
@@ -43,11 +56,6 @@ vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
 
   p1 <- nrow(V1)
   p2 <- nrow(V2)
-
-  if (is.null(p1) || is.null(p2) || p1 < 1L || p2 < 1L) {
-    stop("Could not extract valid stage-specific covariance matrices.",
-         call. = FALSE)
-  }
 
   i1 <- seq_len(p1)
   i2 <- p1 + seq_len(p2)

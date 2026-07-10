@@ -16,6 +16,55 @@
   length(cf)
 }
 
+
+.tsco_stage_coef_table <- function(fit, kind, po.reverse = FALSE) {
+  b_raw <- tryCatch(stats::coef(fit), error = function(e) NULL)
+  V_raw <- tryCatch(stats::vcov(fit), error = function(e) NULL)
+
+  if (is.null(b_raw)) {
+    return(matrix(numeric(0), nrow = 0L, ncol = 0L))
+  }
+
+  s <- .tsco_sign_vector(fit, kind = kind, po.reverse = po.reverse)
+
+  b <- b_raw * s
+
+  if (is.null(V_raw)) {
+    return(
+      matrix(
+        b,
+        ncol = 1L,
+        dimnames = list(names(b), "Estimate")
+      )
+    )
+  }
+
+  V_raw <- as.matrix(V_raw)
+
+  if (!is.null(rownames(V_raw))) {
+    s_v <- s[rownames(V_raw)]
+    V <- V_raw * outer(s_v, s_v)
+    b <- b[rownames(V_raw)]
+  } else {
+    V <- V_raw * outer(s, s)
+  }
+
+  se <- sqrt(diag(V))
+
+  z <- b / se
+  p <- 2 * stats::pnorm(abs(z), lower.tail = FALSE)
+
+  out <- cbind(
+    Estimate = b,
+    `Std. Error` = se,
+    `z value` = z,
+    `Pr(>|z|)` = p
+  )
+
+  rownames(out) <- names(b)
+  out
+}
+
 #' Extract a stage's coefficient table, sign-corrected to match
 #' coef.tsco()/vcov.tsco().
 #'
@@ -27,72 +76,12 @@
 #'
 #' @param fit A fitted stage model (a "vglm" object).
 #' @param kind "po" or "multinomial", i.e. object$stage1 or object$stage2.
-.tsco_coef_table <- function(fit, kind) {
-  ct <- NULL
-
-  s <- tryCatch(summary(fit), error = function(e) NULL)
-
-  if (!is.null(s)) {
-    ct <- tryCatch(stats::coef(s), error = function(e) NULL)
-
-    if (!(is.matrix(ct) || is.data.frame(ct))) {
-      ct <- NULL
-
-      # VGAM summary objects are commonly S4. Try common slots if coef() failed.
-      if (methods::is(s, "summaryvglm")) {
-        sn <- methods::slotNames(s)
-
-        for (slot_name in c("coef3", "coef4", "coeftable")) {
-          if (slot_name %in% sn) {
-            cand <- tryCatch(methods::slot(s, slot_name), error = function(e) NULL)
-
-            if (is.matrix(cand) || is.data.frame(cand)) {
-              ct <- cand
-              break
-            }
-          }
-        }
-      }
-    }
-  }
-
-  if (is.null(ct)) {
-    # Fallback: estimates only.
-    cf <- tryCatch(stats::coef(fit), error = function(e) NULL)
-
-    if (is.null(cf)) {
-      return(matrix(numeric(0), nrow = 0L, ncol = 0L))
-    }
-
-    ct <- matrix(
-      cf,
-      ncol = 1L,
-      dimnames = list(names(cf), "Estimate")
-    )
-  } else {
-    ct <- as.matrix(ct)
-  }
-
-  if (identical(kind, "multinomial") && nrow(ct) > 0L) {
-    is_intercept <- grepl("(Intercept)", rownames(ct), fixed = TRUE)
-    flip_rows <- !is_intercept
-
-    if (any(flip_rows)) {
-      cn <- colnames(ct)
-      # "Estimate" and any column that is estimate-scaled (test statistics
-      # such as "z value"/"t value") flip sign; "Std. Error" and p-value
-      # columns do not.
-      flip_cols <- grepl(
-        "^Estimate$|z value|t value|Wald",
-        cn,
-        ignore.case = TRUE
-      )
-
-      ct[flip_rows, flip_cols] <- -ct[flip_rows, flip_cols]
-    }
-  }
-
-  ct
+.tsco_coef_table <- function(fit, kind, po.reverse = FALSE) {
+  .tsco_stage_coef_table(
+    fit = fit,
+    kind = kind,
+    po.reverse = po.reverse
+  )
 }
 
 .tsco_model_label <- function(x) {
@@ -209,20 +198,32 @@
 #'
 #' @param fit A fitted stage model (a "vglm" object).
 #' @param kind "po" or "multinomial", i.e. object$stage1 or object$stage2.
+#' @param po.reverse Logical, whether the stage 1 PO model was fit with
+#'  VGAM::cumulative(reverse = TRUE). If TRUE, the stage 1 PO slopes have
 #' @return A named numeric vector of +1/-1, same length and names as
 #'   stats::coef(fit).
-.tsco_sign_vector <- function(fit, kind) {
+.tsco_sign_vector <- function(fit, kind, po.reverse = FALSE) {
   cf <- stats::coef(fit)
   s <- rep(1, length(cf))
   names(s) <- names(cf)
 
+  is_intercept <- grepl("(Intercept)", names(cf), fixed = TRUE)
+
   if (identical(kind, "multinomial")) {
-    is_intercept <- grepl("(Intercept)", names(cf), fixed = TRUE)
+    # VGAM multinomial uses alpha + x'beta, while manuscript uses
+    # alpha - x'beta. Flip non-intercepts.
+    s[!is_intercept] <- -1
+  }
+
+  if (identical(kind, "po") && isTRUE(po.reverse)) {
+    # With reverse = TRUE, VGAM's PO slopes have the opposite sign from
+    # the manuscript beta convention. Flip non-intercepts.
     s[!is_intercept] <- -1
   }
 
   s
 }
+
 
 .tsco_align_prob <- function(p, levels) {
   p <- as.matrix(p)
@@ -252,4 +253,108 @@
   # probabilities in the correct order but with transformed/syntactic names.
   colnames(p) <- levels
   p[, levels, drop = FALSE]
+}
+
+
+.tsco_base_coef_name <- function(x) {
+  # Remove package-level stage prefix from coef.tsco().
+  x <- sub("^stage[12]:", "", x)
+
+  # Remove VGAM linear-predictor suffix, e.g. let:1 -> let.
+  # This preserves interactions such as x:z while converting x:z:1 to x:z.
+  x <- sub(":[0-9]+$", "", x)
+
+  x
+}
+
+.tsco_is_intercept_name <- function(x) {
+  x == "(Intercept)"
+}
+
+.tsco_wald_stat <- function(b, V) {
+  b <- as.numeric(b)
+  V <- as.matrix(V)
+
+  if (length(b) == 0L) {
+    return(NA_real_)
+  }
+
+  if (any(!is.finite(b)) || any(!is.finite(V))) {
+    return(NA_real_)
+  }
+
+  tryCatch(
+    as.numeric(crossprod(b, qr.solve(V, b))),
+    error = function(e) NA_real_
+  )
+}
+
+.tsco_joint_wald_tests <- function(object) {
+  b <- stats::coef(object, stage = "both")
+  V <- stats::vcov(object, stage = "both")
+
+  if (length(b) == 0L) {
+    return(data.frame())
+  }
+
+  V <- as.matrix(V)
+
+  if (is.null(names(b))) {
+    stop(
+      "Cannot compute joint tests because coefficients are unnamed.",
+      call. = FALSE
+    )
+  }
+
+  if (is.null(rownames(V)) || is.null(colnames(V))) {
+    stop(
+      "Cannot compute joint tests because covariance matrix is unnamed.",
+      call. = FALSE
+    )
+  }
+
+  if (!all(names(b) %in% rownames(V)) || !all(names(b) %in% colnames(V))) {
+    stop(
+      "Cannot compute joint tests because coefficient and covariance names do not align.",
+      call. = FALSE
+    )
+  }
+
+  base_names <- .tsco_base_coef_name(names(b))
+
+  test_names <- unique(base_names[!.tsco_is_intercept_name(base_names)])
+
+  if (length(test_names) == 0L) {
+    return(data.frame())
+  }
+
+  res <- lapply(test_names, function(term) {
+    idx <- which(base_names == term)
+
+    b_term <- b[idx]
+    V_term <- V[names(b_term), names(b_term), drop = FALSE]
+
+    stat <- .tsco_wald_stat(b_term, V_term)
+    df <- length(b_term)
+
+    p <- if (is.finite(stat)) {
+      stats::pchisq(stat, df = df, lower.tail = FALSE)
+    } else {
+      NA_real_
+    }
+
+    data.frame(
+      term = term,
+      df = df,
+      Chisq = stat,
+      `Pr(>Chisq)` = p,
+      check.names = FALSE
+    )
+  })
+
+  out <- do.call(rbind, res)
+  rownames(out) <- out$term
+  out$term <- NULL
+
+  out
 }
