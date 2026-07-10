@@ -5,7 +5,7 @@
 \title{Extract a stage's coefficient table, sign-corrected to match
 coef.tsco()/vcov.tsco().}
 \usage{
-.tsco_coef_table(fit, kind)
+.tsco_coef_table(fit, kind, po.reverse = FALSE)
 }
 \arguments{
 \item{fit}{A fitted stage model (a "vglm" object).}

@@ -35,13 +35,8 @@ vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   )
 
   # Align sign vectors to covariance matrix names when possible.
-  if (!is.null(rownames(V1_raw))) {
-    s1 <- s1[rownames(V1_raw)]
-  }
-
-  if (!is.null(rownames(V2_raw))) {
-    s2 <- s2[rownames(V2_raw)]
-  }
+  s1 <- .tsco_align_sign_vector(s1, V1_raw)
+  s2 <- .tsco_align_sign_vector(s2, V2_raw)
 
   V1 <- V1_raw * outer(s1, s1)
   V2 <- V2_raw * outer(s2, s2)

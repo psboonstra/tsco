@@ -1,5 +1,5 @@
 Package: tsco
-Title: Two-Stage Conditional Odds Models 
+Title: Two-Stage Conditional Odds Models
 Version: 0.0.0.9000
 Authors@R: 
     person(given = "Philip S.", family = "Boonstra", email = "phil@umich.edu", role = c("aut", "cre"))
@@ -20,6 +20,7 @@ Imports:
     VGAM
 Suggests: 
     dplyr,
+    ordinal,
     testthat (>= 3.0.0),
     tidyr
 Config/testthat/edition: 3

@@ -1,16 +1,13 @@
 test_that("PO|C|MR (stage1 = po, stage2 = multinomial) fits and is well-formed", {
-  skip_if_not_installed("VGAM")
-
-  data(pneumo, package = "VGAM")
-  pneumo <- transform(pneumo, let = log(exposure.time))
+  dat <- make_wine_test_data()
 
   # This is the manuscript's headline variant (Section 2.1.1): conditional PO
   # below the cutoff, marginal (saturated) multinomial at/above it.
   fit <- tsco(
-    cbind(normal, mild, severe) ~ let,
-    data = pneumo,
-    levels = c("mild", "normal", "severe"),
-    cutoff_level = "severe",
+    dat$grouped_formula,
+    data = dat$grouped,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
     stage1 = "po",
     stage2 = "multinomial",
     warn_degenerate = FALSE
@@ -43,18 +40,15 @@ test_that("PO|C|MR (stage1 = po, stage2 = multinomial) fits and is well-formed",
 })
 
 test_that("MR|C|PO (stage1 = multinomial, stage2 = po) fits and is well-formed", {
-  skip_if_not_installed("VGAM")
-
-  data(pneumo, package = "VGAM")
-  pneumo <- transform(pneumo, let = log(exposure.time))
+  dat <- make_wine_test_data()
 
   # The mirror-image variant flagged in Section 2.1.3 as a natural extension:
   # conditional (saturated) multinomial below the cutoff, marginal PO at/above.
   fit <- tsco(
-    cbind(normal, mild, severe) ~ let,
-    data = pneumo,
-    levels = c("mild", "normal", "severe"),
-    cutoff_level = "severe",
+    dat$grouped_formula,
+    data = dat$grouped,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
     stage1 = "multinomial",
     stage2 = "po",
     warn_degenerate = FALSE
@@ -74,25 +68,22 @@ test_that("MR|C|PO (stage1 = multinomial, stage2 = po) fits and is well-formed",
 })
 
 test_that("all four stage1/stage2 combinations produce parameter counts matching the manuscript's formulas", {
-  skip_if_not_installed("VGAM")
+  dat <- make_wine_test_data()
 
-  data(pneumo, package = "VGAM")
-  pneumo <- transform(pneumo, let = log(exposure.time))
-
-  # p = 1 predictor (let). C (cutoff_index) = 3 here: lower_levels has 2
-  # categories ("mild", "normal"), upper_levels has 1 ("severe"), K = 3.
-  p <- 1L
-  K <- 3L
-  cutoff_index <- 3L # "severe" is the 3rd level -> lower partition has 2 cats
-  n_lower <- cutoff_index - 1L # = 2
-  n_upper <- K - cutoff_index + 1L # = 1 (just "severe")
+  # p = 2 predictor (temp, contact, both binary). C (cutoff_index) = 4 here: lower_levels has 3
+  # categories (1, 2, 3), upper_levels has 2 (4, 5), K = 5.
+  p <- 2L
+  K <- 5L
+  cutoff_index <- 4L
+  n_lower <- cutoff_index - 1L # = 3
+  n_upper <- K - cutoff_index + 1L # = 2
 
   fit_combo <- function(stage1, stage2) {
-    tsco(
-      cbind(normal, mild, severe) ~ let,
-      data = pneumo,
-      levels = c("mild", "normal", "severe"),
-      cutoff_level = "severe",
+    fit <- tsco(
+      dat$grouped_formula,
+      data = dat$grouped,
+      levels = dat$levels,
+      cutoff_level = dat$cutoff_level,
       stage1 = stage1,
       stage2 = stage2,
       warn_degenerate = FALSE
@@ -122,5 +113,15 @@ test_that("all four stage1/stage2 combinations produce parameter counts matching
   expect_equal(
     length(coef(fit_mr_po)),
     (n_lower - 1L) * (p + 1L) + (n_upper + p)
+  )
+
+  # --- MR|C|MR: symmetric construction, derived the same way -------------
+  # Stage 1 (multinomial, saturated over n_lower categories):
+  #   (n_lower - 1)(p + 1) parameters.
+  # Stage 2 (multinomial, over n_upper + 1 collapsed categories): n_upper * (p + 1)
+  fit_mr_mr <- fit_combo("multinomial", "multinomial")
+  expect_equal(
+    length(coef(fit_mr_mr)),
+    (n_lower - 1L) * (p + 1L) + (n_upper * (p + 1L))
   )
 })

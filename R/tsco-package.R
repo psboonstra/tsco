@@ -53,7 +53,7 @@
 #'
 #' @docType package
 #' @name tsco-package
-#' @keywords internal
+
 "_PACKAGE"
 
 ## usethis namespace: start

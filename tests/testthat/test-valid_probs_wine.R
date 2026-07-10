@@ -1,14 +1,11 @@
-test_that("predict.tsco returns valid probabilities", {
-  skip_if_not_installed("VGAM")
-
-  data(pneumo, package = "VGAM")
-  pneumo <- transform(pneumo, let = log(exposure.time))
+test_that("predict.tsco returns valid wine probabilities", {
+  dat <- make_wine_test_data()
 
   fit <- tsco(
-    cbind(normal, mild, severe) ~ let,
-    data = pneumo,
-    levels = c("mild", "normal", "severe"),
-    cutoff_level = "severe",
+    dat$grouped_formula,
+    data = dat$grouped,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
     stage1 = "po",
     stage2 = "po",
     warn_degenerate = FALSE

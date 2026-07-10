@@ -14,8 +14,9 @@
 \item{...}{Ignored.}
 }
 \value{
-A named numeric vector of coefficients. If \code{stage = "both"},
-coefficient names are prefixed by \code{"stage1:"} and \code{"stage2:"}.
+A named numeric vector of coefficients on the TSCO/manuscript scale.
+If \code{stage = "both"}, coefficient names are prefixed by \code{"stage1:"} and
+\code{"stage2:"}.
 }
 \description{
 Coefficients are reported in the manuscript's parameterization

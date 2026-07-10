@@ -1,27 +1,26 @@
 test_that("predict.tsco works with newdata and matches VGAM", {
-  skip_if_not_installed("VGAM")
+  dat <- make_wine_test_data()
 
-  data(pneumo, package = "VGAM")
-  pneumo <- transform(pneumo, let = log(exposure.time))
-
+  # This is the manuscript's headline variant (Section 2.1.1): conditional PO
+  # below the cutoff, marginal (saturated) multinomial at/above it.
   fit <- tsco(
-    cbind(normal, mild, severe) ~ let,
-    data = pneumo,
-    levels = c("mild", "normal", "severe"),
-    cutoff_level = "severe",
+    dat$grouped_formula,
+    data = dat$grouped,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
     stage1 = "po",
-    stage2 = "po",
+    stage2 = "multinomial",
     warn_degenerate = FALSE
   )
 
-  nd <- data.frame(let = seq(min(pneumo$let), max(pneumo$let), length.out = 5))
+  nd <- dat$grouped[,c("temp", "contact")]
 
   p_tsco <- predict(fit, newdata = nd, type = "prob")
 
   # Check structure
   expect_equal(nrow(p_tsco), nrow(nd))
   expect_equal(colnames(p_tsco), fit$levels)
-  expect_equal(rowSums(p_tsco), rep(1, nrow(nd)), tolerance = 1e-8);
+  expect_equal(rowSums(p_tsco), rep(1, nrow(nd)), tolerance = 1e-8, ignore_attr = TRUE);
 
   # Compare to hand-calcuated predictvglm() calls
   p1 <- VGAM::predictvglm(fit$fit_stage1, newdata = nd, type = "response")

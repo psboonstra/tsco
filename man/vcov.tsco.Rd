@@ -14,9 +14,8 @@
 \item{...}{Ignored.}
 }
 \value{
-A variance-covariance matrix. If \code{stage = "both"}, the returned
-matrix is block diagonal with stage-specific coefficient names prefixed by
-\code{"stage1:"} and \code{"stage2:"}.
+A variance-covariance matrix on the TSCO/manuscript coefficient
+scale. If \code{stage = "both"}, the returned matrix is block diagonal.
 }
 \description{
 Reported on the same sign-corrected scale as \code{coef.tsco()}. If a stage's

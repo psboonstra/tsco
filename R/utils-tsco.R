@@ -42,7 +42,7 @@
   V_raw <- as.matrix(V_raw)
 
   if (!is.null(rownames(V_raw))) {
-    s_v <- s[rownames(V_raw)]
+    s_v <- .tsco_align_sign_vector(s, V_raw)
     V <- V_raw * outer(s_v, s_v)
     b <- b[rownames(V_raw)]
   } else {
@@ -65,17 +65,17 @@
   out
 }
 
-#' Extract a stage's coefficient table, sign-corrected to match
-#' coef.tsco()/vcov.tsco().
+#' Construct a stage-level coefficient table on the TSCO/manuscript scale.
 #'
-#' `Estimate` and any test-statistic column built by dividing the estimate
-#' by its (sign-invariant) standard error -- e.g. `z value`, `t value` --
-#' are flipped for non-intercept rows when `kind == "multinomial"`.
-#' `Std. Error` and p-value columns are unaffected, since neither depends
-#' on the sign of the estimate.
+#' Estimates and covariance matrices are transformed using `.tsco_sign_vector()`.
+#' Standard errors and p-values are computed from the transformed covariance
+#' matrix.
 #'
 #' @param fit A fitted stage model (a "vglm" object).
 #' @param kind "po" or "multinomial", i.e. object$stage1 or object$stage2.
+#' @param po.reverse Logical. Whether PO stages were fit with
+#'   `VGAM::cumulative(reverse = TRUE)`. If `TRUE`, non-intercept PO
+#'   coefficients are sign-flipped to match the manuscript's beta convention.
 .tsco_coef_table <- function(fit, kind, po.reverse = FALSE) {
   .tsco_stage_coef_table(
     fit = fit,
@@ -198,8 +198,9 @@
 #'
 #' @param fit A fitted stage model (a "vglm" object).
 #' @param kind "po" or "multinomial", i.e. object$stage1 or object$stage2.
-#' @param po.reverse Logical, whether the stage 1 PO model was fit with
-#'  VGAM::cumulative(reverse = TRUE). If TRUE, the stage 1 PO slopes have
+#' @param po.reverse Logical. Whether PO stages were fit with
+#'   `VGAM::cumulative(reverse = TRUE)`. If `TRUE`, non-intercept PO
+#'   coefficients are sign-flipped to match the manuscript's beta convention.
 #' @return A named numeric vector of +1/-1, same length and names as
 #'   stats::coef(fit).
 .tsco_sign_vector <- function(fit, kind, po.reverse = FALSE) {
@@ -224,6 +225,22 @@
   s
 }
 
+.tsco_align_sign_vector <- function(s, V) {
+  rn <- rownames(V)
+
+  if (is.null(rn)) {
+    return(s)
+  }
+
+  if (!all(rn %in% names(s))) {
+    stop(
+      "Internal error: covariance matrix names do not align with coefficient names.",
+      call. = FALSE
+    )
+  }
+
+  s[rn]
+}
 
 .tsco_align_prob <- function(p, levels) {
   p <- as.matrix(p)

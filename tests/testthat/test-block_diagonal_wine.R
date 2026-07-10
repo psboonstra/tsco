@@ -1,16 +1,15 @@
 test_that("combined vcov is block diagonal", {
-  skip_if_not_installed("VGAM")
+  dat <- make_wine_test_data()
 
-  data(pneumo, package = "VGAM")
-  pneumo <- transform(pneumo, let = log(exposure.time))
-
+  # This is the manuscript's headline variant (Section 2.1.1): conditional PO
+  # below the cutoff, marginal (saturated) multinomial at/above it.
   fit <- tsco(
-    cbind(normal, mild, severe) ~ let,
-    data = pneumo,
-    levels = c("mild", "normal", "severe"),
-    cutoff_level = "severe",
+    dat$grouped_formula,
+    data = dat$grouped,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
     stage1 = "po",
-    stage2 = "po",
+    stage2 = "multinomial",
     warn_degenerate = FALSE
   )
 

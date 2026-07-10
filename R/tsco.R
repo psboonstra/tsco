@@ -12,7 +12,8 @@
 #' cbind(normal, mild, severe) ~ x.
 #'
 #' @param formula Model formula, e.g. y ~ x1 + x2 for individual-level data or
-#'   cbind(y0, y1, y2) ~ x1 + x2 for grouped count data.
+#'   cbind(y0, y1, y2) ~ x1 + x2 for grouped count data. Note: transformed
+#'   predictors should be precomputed
 #' @param data A data.frame.
 #' @param cutoff_level The first outcome level in the upper partition, supplied
 #'   as a level label.
@@ -501,6 +502,7 @@ tsco <- function(
     grouped = is_grouped,
     fit_stage1 = fit1,
     fit_stage2 = fit2,
+    predict_data = d2,
     # sample-size accounting
     n = n_obs,
     n_obs = n_obs,
