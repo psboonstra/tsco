@@ -12,8 +12,10 @@
 #' cbind(normal, mild, severe) ~ x.
 #'
 #' @param formula Model formula, e.g. y ~ x1 + x2 for individual-level data or
-#'   cbind(y0, y1, y2) ~ x1 + x2 for grouped count data. Note: transformed
-#'   predictors should be precomputed
+#'   cbind(y0, y1, y2) ~ x1 + x2 for grouped count data.
+#'   Note: transformed predictors should currently be precomputed before
+#'   calling `tsco()`, as inline transformations in the formula may not be
+#'   available in the internally constructed stage-specific data frames.
 #' @param data A data.frame.
 #' @param cutoff_level The first outcome level in the upper partition, supplied
 #'   as a level label.
@@ -64,6 +66,7 @@ tsco <- function(
 
   stage1 <- match.arg(stage1)
   stage2 <- match.arg(stage2)
+  vglm_args <- list(...)
 
   if (missing(data)) {
     data <- parent.frame()
@@ -502,7 +505,15 @@ tsco <- function(
     grouped = is_grouped,
     fit_stage1 = fit1,
     fit_stage2 = fit2,
+
+    # For prediction and LRT refits
     predict_data = d2,
+    data_stage1 = d1,
+    data_stage2 = d2,
+    weights_stage1 = w1,
+    weights_stage2 = w2,
+    vglm_args = vglm_args,
+
     # sample-size accounting
     n = n_obs,
     n_obs = n_obs,

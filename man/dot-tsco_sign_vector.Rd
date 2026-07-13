@@ -12,8 +12,9 @@ parameterization.}
 
 \item{kind}{"po" or "multinomial", i.e. object$stage1 or object$stage2.}
 
-\item{po.reverse}{Logical, whether the stage 1 PO model was fit with
-VGAM::cumulative(reverse = TRUE). If TRUE, the stage 1 PO slopes have}
+\item{po.reverse}{Logical. Whether PO stages were fit with
+\code{VGAM::cumulative(reverse = TRUE)}. If \code{TRUE}, non-intercept PO
+coefficients are sign-flipped to match the manuscript's beta convention.}
 }
 \value{
 A named numeric vector of +1/-1, same length and names as

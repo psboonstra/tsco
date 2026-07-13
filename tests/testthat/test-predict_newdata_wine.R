@@ -20,9 +20,9 @@ test_that("predict.tsco works with newdata and matches VGAM", {
   # Check structure
   expect_equal(nrow(p_tsco), nrow(nd))
   expect_equal(colnames(p_tsco), fit$levels)
-  expect_equal(rowSums(p_tsco), rep(1, nrow(nd)), tolerance = 1e-8, ignore_attr = TRUE);
+  expect_equal(rowSums(p_tsco), rep(1, nrow(nd)), tolerance = 1e-8, ignore_attr = TRUE)
 
-  # Compare to hand-calcuated predictvglm() calls
+  # Compare to hand-calculated predictvglm() calls
   p1 <- VGAM::predictvglm(fit$fit_stage1, newdata = nd, type = "response")
   p2 <- VGAM::predictvglm(fit$fit_stage2, newdata = nd, type = "response")
 

@@ -42,31 +42,3 @@ make_wine_test_data <- function() {
     grouped_formula = grouped_formula
   )
 }
-
-fit_wine_individual <- function(stage1 = "po", stage2 = "po") {
-  dat <- make_wine_test_data()
-
-  tsco(
-    dat$individual_formula,
-    data = dat$individual,
-    levels = dat$levels,
-    cutoff_level = dat$cutoff_level,
-    stage1 = stage1,
-    stage2 = stage2,
-    warn_degenerate = FALSE
-  )
-}
-
-fit_wine_grouped <- function(stage1 = "po", stage2 = "po") {
-  dat <- make_wine_test_data()
-
-  tsco(
-    dat$grouped_formula,
-    data = dat$grouped,
-    levels = dat$levels,
-    cutoff_level = dat$cutoff_level,
-    stage1 = stage1,
-    stage2 = stage2,
-    warn_degenerate = FALSE
-  )
-}

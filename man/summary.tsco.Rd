@@ -4,10 +4,14 @@
 \alias{summary.tsco}
 \title{Summarize a TSCO model}
 \usage{
-\method{summary}{tsco}(object, ...)
+\method{summary}{tsco}(object, joint_test = c("LRT", "Wald", "none"), ...)
 }
 \arguments{
 \item{object}{An object of class \code{"tsco"}.}
+
+\item{joint_test}{Character string specifying the type of joint test to
+perform across stages. Options are \code{"LRT"} for likelihood ratio test,
+\code{"Wald"} for Wald test, or \code{"none"} to skip joint tests. Default is \code{"LRT"}.}
 
 \item{...}{Ignored.}
 }

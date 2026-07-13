@@ -1,4 +1,4 @@
-test_that("vcov.tsco applies documented sign correction for all stage combinations", {
+test_that("coef.tsco and vcov.tsco apply documented sign correction for all stage combinations", {
   dat <- make_wine_test_data()
 
   combos <- expand.grid(
@@ -17,6 +17,24 @@ test_that("vcov.tsco applies documented sign correction for all stage combinatio
       stage2 = combos$stage2[ii],
       warn_degenerate = FALSE
     )
+
+    b1_raw <- stats::coef(fit$fit_stage1)
+    b2_raw <- stats::coef(fit$fit_stage2)
+
+    s1 <- .tsco_sign_vector(
+      fit$fit_stage1,
+      kind = fit$stage1,
+      po.reverse = fit$po.reverse
+    )
+
+    s2 <- .tsco_sign_vector(
+      fit$fit_stage2,
+      kind = fit$stage2,
+      po.reverse = fit$po.reverse
+    )
+
+    expect_equal(coef(fit, stage = "stage1"), b1_raw * s1)
+    expect_equal(coef(fit, stage = "stage2"), b2_raw * s2)
 
     V2_raw <- as.matrix(stats::vcov(fit$fit_stage2))
 

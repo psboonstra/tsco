@@ -375,3 +375,191 @@
 
   out
 }
+
+.tsco_make_family <- function(kind, po.reverse = FALSE) {
+  if (identical(kind, "po")) {
+    VGAM::cumulative(
+      link = "logitlink",
+      parallel = TRUE,
+      reverse = po.reverse
+    )
+  } else if (identical(kind, "multinomial")) {
+    VGAM::multinomial(refLevel = 1)
+  } else {
+    stop("Unknown stage model kind: ", kind, call. = FALSE)
+  }
+}
+
+.tsco_fit_vglm_internal <- function(
+    formula,
+    family,
+    data,
+    weights = NULL,
+    vglm_args = list()) {
+
+  args <- list(
+    formula = formula,
+    family = family,
+    data = data
+  )
+
+  if (!is.null(weights)) {
+    args$weights <- weights
+  }
+
+  args <- c(args, vglm_args)
+
+  do.call(VGAM::vglm, args)
+}
+
+.tsco_vglm_loglik <- function(fit) {
+  out <- tryCatch({
+    as.numeric(fit@criterion["loglikelihood"])
+  }, error = function(e) NA_real_)
+
+  if (length(out) != 1L || !is.finite(out)) {
+    NA_real_
+  } else {
+    out
+  }
+}
+
+.tsco_drop_term_formula <- function(formula, term) {
+  tt <- stats::terms(formula)
+  term_labels <- attr(tt, "term.labels")
+
+  pos <- match(term, term_labels)
+
+  if (is.na(pos)) {
+    stop("Term not found in formula: ", term, call. = FALSE)
+  }
+
+  tt_reduced <- stats::drop.terms(
+    tt,
+    dropx = pos,
+    keep.response = TRUE
+  )
+
+  f_reduced <- stats::formula(tt_reduced)
+  environment(f_reduced) <- environment(formula)
+
+  f_reduced
+}
+
+.tsco_joint_lrt_tests <- function(object) {
+  if (is.null(object$data_stage1) ||
+      is.null(object$data_stage2) ||
+      is.null(object$weights_stage1) && !("weights_stage1" %in% names(object)) ||
+      is.null(object$weights_stage2) && !("weights_stage2" %in% names(object))) {
+    stop(
+      "Joint LRTs require stage-specific data stored in the tsco object. ",
+      "Please refit the model with the current version of tsco().",
+      call. = FALSE
+    )
+  }
+
+  term_labels <- attr(stats::terms(object$stage1_formula), "term.labels")
+
+  if (length(term_labels) == 0L) {
+    return(
+      data.frame(
+        df = integer(),
+        Chisq = numeric(),
+        `Pr(>Chisq)` = numeric(),
+        check.names = FALSE
+      )
+    )
+  }
+
+  ll1_full <- .tsco_vglm_loglik(object$fit_stage1)
+  ll2_full <- .tsco_vglm_loglik(object$fit_stage2)
+
+  df1_full <- .tsco_df(object$fit_stage1)
+  df2_full <- .tsco_df(object$fit_stage2)
+
+  if (!is.finite(ll1_full) || !is.finite(ll2_full)) {
+    stop(
+      "Could not extract full-model log-likelihoods for LRTs.",
+      call. = FALSE
+    )
+  }
+
+  vglm_args <- object$vglm_args
+  if (is.null(vglm_args)) {
+    vglm_args <- list()
+  }
+
+  fam1 <- .tsco_make_family(object$stage1, po.reverse = object$po.reverse)
+  fam2 <- .tsco_make_family(object$stage2, po.reverse = object$po.reverse)
+
+  res <- lapply(term_labels, function(term) {
+    out <- tryCatch({
+      f1_reduced <- .tsco_drop_term_formula(object$stage1_formula, term)
+      f2_reduced <- .tsco_drop_term_formula(object$stage2_formula, term)
+
+      fit1_reduced <- .tsco_fit_vglm_internal(
+        formula = f1_reduced,
+        family = fam1,
+        data = object$data_stage1,
+        weights = object$weights_stage1,
+        vglm_args = vglm_args
+      )
+
+      fit2_reduced <- .tsco_fit_vglm_internal(
+        formula = f2_reduced,
+        family = fam2,
+        data = object$data_stage2,
+        weights = object$weights_stage2,
+        vglm_args = vglm_args
+      )
+
+      ll1_reduced <- .tsco_vglm_loglik(fit1_reduced)
+      ll2_reduced <- .tsco_vglm_loglik(fit2_reduced)
+
+      df1_reduced <- .tsco_df(fit1_reduced)
+      df2_reduced <- .tsco_df(fit2_reduced)
+
+      lrt <- 2 * (
+        (ll1_full + ll2_full) -
+          (ll1_reduced + ll2_reduced)
+      )
+
+      # Numerical cleanup for tiny negative values from optimizer tolerance.
+      if (is.finite(lrt) && lrt < 0 && lrt > -1e-7) {
+        lrt <- 0
+      }
+
+      df <- (df1_full - df1_reduced) + (df2_full - df2_reduced)
+
+      p <- if (is.finite(lrt) && is.finite(df) && df > 0) {
+        stats::pchisq(lrt, df = df, lower.tail = FALSE)
+      } else {
+        NA_real_
+      }
+
+      data.frame(
+        term = term,
+        df = df,
+        Chisq = lrt,
+        `Pr(>Chisq)` = p,
+        check.names = FALSE
+      )
+    }, error = function(e) {
+      data.frame(
+        term = term,
+        df = NA_real_,
+        Chisq = NA_real_,
+        `Pr(>Chisq)` = NA_real_,
+        check.names = FALSE
+      )
+    })
+
+    out
+  })
+
+  out <- do.call(rbind, res)
+  rownames(out) <- out$term
+  out$term <- NULL
+
+  out
+}

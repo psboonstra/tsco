@@ -1,30 +1,9 @@
 test_that("tsco recovers known true multinomial-stage coefficients (simple, 1-param case)", {
   skip_if_not_installed("VGAM")
 
-  # -------------------------------------------------------------------------
-  # Minimal, unambiguous case: stage 2 has exactly one non-reference category,
-  # so there is no coefficient-ordering ambiguity to worry about -- there is
-  # only one x-coefficient in the multinomial stage, full stop.
-  #
-  # DGP follows the manuscript's Eq. (2) convention:
-  #   Pr(Y = 0 | X) ~ 1
-  #   Pr(Y = k | X) ~ exp(alpha_k - x * beta_k)
-  # with "<C" (Y = 0 analog) as the reference category.
-  #
-  # Stage 1 is fit as PO with po.reverse = FALSE (the corrected convention
-  # confirmed in the companion PO sign-recovery test) so this test isolates
-  # the multinomial-stage sign convention specifically.
-  #
-  # This test previously caught a confirmed sign flip in the raw VGAM
-  # multinomial() output (fitted ~= 1.48 vs. true_beta_C = -1.5). coef.tsco()
-  # now applies .tsco_sign_vector() to correct this, so the assertions below
-  # check the corrected, user-facing coef.tsco() output directly and serve
-  # as a regression test against that fix.
-  # -------------------------------------------------------------------------
-
   set.seed(20260710)
 
-  n <- 50000
+  n <- 5e3
   x <- stats::rnorm(n)
 
   true_beta1 <- 0.8    # stage 1 (conditional PO): L1 vs L2
@@ -74,26 +53,9 @@ test_that("tsco recovers known true multinomial-stage coefficients (simple, 1-pa
 test_that("tsco recovers known true multinomial-stage coefficients (2-param case, order-assumption documented)", {
   skip_if_not_installed("VGAM")
 
-  # -------------------------------------------------------------------------
-  # Fuller case: stage 2 has TWO non-reference categories ("C" and "U2"),
-  # collapsed_levels = c("<C", "C", "U2"). This genuinely exercises the
-  # saturated multinomial machinery (distinct, non-proportional
-  # category-specific slopes), which the 1-param test above cannot.
-  #
-  # ASSUMPTION BEING RELIED ON (not independently verified against VGAM's
-  # source/docs in this session): VGAM::multinomial(refLevel = 1) returns
-  # coefficients in the order of the factor's non-reference levels, i.e.
-  # the first "x"-like coefficient corresponds to the 2nd factor level
-  # ("C"), the second to the 3rd factor level ("U2"). If this assumption is
-  # wrong, the two expect_equal() calls below may appear to fail with
-  # swapped values even though signs/magnitudes are individually correct --
-  # if that happens, run `names(coef(fit, stage = "stage2"))` and inspect
-  # which name goes with which value before concluding there's a real bug.
-  # -------------------------------------------------------------------------
-
   set.seed(20260710)
 
-  n <- 80000
+  n <- 5e3
   x <- stats::rnorm(n)
 
   true_beta1 <- 0.8

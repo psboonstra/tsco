@@ -18,5 +18,5 @@ test_that("predict.tsco returns valid wine probabilities", {
   expect_equal(nrow(p), fit$n_groups)
   expect_true(all(p >= -1e-10))
   expect_true(all(p <= 1 + 1e-10))
-  expect_equal(rowSums(p), rep(1, nrow(p)), tolerance = 1e-8)
+  expect_equal(rowSums(p), rep(1, nrow(p)), tolerance = 1e-8, ignore_attr = TRUE)
 })

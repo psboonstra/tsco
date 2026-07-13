@@ -20,7 +20,10 @@ tsco(
 }
 \arguments{
 \item{formula}{Model formula, e.g. y ~ x1 + x2 for individual-level data or
-cbind(y0, y1, y2) ~ x1 + x2 for grouped count data.}
+cbind(y0, y1, y2) ~ x1 + x2 for grouped count data.
+Note: transformed predictors should currently be precomputed before
+calling \code{tsco()}, as inline transformations in the formula may not be
+available in the internally constructed stage-specific data frames.}
 
 \item{data}{A data.frame.}
 

@@ -2,8 +2,7 @@
 % Please edit documentation in R/utils-tsco.R
 \name{.tsco_coef_table}
 \alias{.tsco_coef_table}
-\title{Extract a stage's coefficient table, sign-corrected to match
-coef.tsco()/vcov.tsco().}
+\title{Construct a stage-level coefficient table on the TSCO/manuscript scale.}
 \usage{
 .tsco_coef_table(fit, kind, po.reverse = FALSE)
 }
@@ -11,11 +10,13 @@ coef.tsco()/vcov.tsco().}
 \item{fit}{A fitted stage model (a "vglm" object).}
 
 \item{kind}{"po" or "multinomial", i.e. object$stage1 or object$stage2.}
+
+\item{po.reverse}{Logical. Whether PO stages were fit with
+\code{VGAM::cumulative(reverse = TRUE)}. If \code{TRUE}, non-intercept PO
+coefficients are sign-flipped to match the manuscript's beta convention.}
 }
 \description{
-\code{Estimate} and any test-statistic column built by dividing the estimate
-by its (sign-invariant) standard error -- e.g. \verb{z value}, \verb{t value} --
-are flipped for non-intercept rows when \code{kind == "multinomial"}.
-\verb{Std. Error} and p-value columns are unaffected, since neither depends
-on the sign of the estimate.
+Estimates and covariance matrices are transformed using \code{.tsco_sign_vector()}.
+Standard errors and p-values are computed from the transformed covariance
+matrix.
 }

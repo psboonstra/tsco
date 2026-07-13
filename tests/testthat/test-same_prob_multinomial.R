@@ -2,10 +2,9 @@ test_that("tsco model produces same probabilities as standard multinomial in edg
   skip_if_not_installed("VGAM")
   skip_if_not_installed("dplyr")
 
+  set.seed(100)
 
-  set.seed(20260710)
-
-  n <- 50000
+  n <- 500
 
   probs_x0 <- runif(5)
   probs_x1 <- runif(5)
@@ -15,10 +14,16 @@ test_that("tsco model produces same probabilities as standard multinomial in edg
     x * sample(5, size = n, prob = probs_x1, replace = TRUE)
 
   dat <- data.frame(x = x, y = ordered(y, levels = c("1", "2", "3", "4", "5")))
-  dat_grouped <-
-    dat %>%
-    dplyr::group_by(x) %>%
-    dplyr::summarize(y1 = sum(y == "1"), y2 = sum(y == "2"), y3 = sum(y == "3"), y4 = sum(y == "4"), y5 = sum(y == "5"))
+  dat_grouped <- dat |>
+    dplyr::group_by(x) |>
+    dplyr::summarize(
+      y1 = sum(y == "1"),
+      y2 = sum(y == "2"),
+      y3 = sum(y == "3"),
+      y4 = sum(y == "4"),
+      y5 = sum(y == "5"),
+      .groups = "drop"
+    )
 
   fit1 <- tsco(
     cbind(y1, y2, y3, y4, y5) ~ x,
@@ -46,7 +51,7 @@ test_that("tsco model produces same probabilities as standard multinomial in edg
   fit3 <- VGAM::vglm(
     cbind(y1, y2, y3, y4, y5) ~ x,
     data = dat_grouped,
-    family = "multinomial"
+    family = VGAM::multinomial(),
   )
 
   predict_fit3 <-

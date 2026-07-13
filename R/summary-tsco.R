@@ -3,13 +3,16 @@
 #' Produces a concise statistical summary of both fitted TSCO stages.
 #'
 #' @param object An object of class `"tsco"`.
+#' @param joint_test Character string specifying the type of joint test to
+#'  perform across stages. Options are `"LRT"` for likelihood ratio test,
+#'  `"Wald"` for Wald test, or `"none"` to skip joint tests. Default is `"LRT"`.
 #' @param ... Ignored.
 #'
 #' @return An object of class `"summary.tsco"`.
 #'
 #' @method summary tsco
 #' @export
-summary.tsco <- function(object, ...) {
+summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
   coef_stage1 <- .tsco_coef_table(
     object$fit_stage1,
     kind = object$stage1,
@@ -22,7 +25,14 @@ summary.tsco <- function(object, ...) {
     po.reverse = object$po.reverse
   )
 
-  joint_tests <- .tsco_joint_wald_tests(object)
+  joint_test <- match.arg(joint_test)
+
+  joint_tests <- switch(
+    joint_test,
+    LRT = .tsco_joint_lrt_tests(object),
+    Wald = .tsco_joint_wald_tests(object),
+    none = data.frame()
+  )
 
   ll1 <- as.numeric(object$logLik_stage1)
   ll2 <- as.numeric(object$logLik_stage2)
@@ -108,6 +118,7 @@ summary.tsco <- function(object, ...) {
       AIC = total_AIC,
       BIC = total_BIC
     ),
+    joint_test_type = joint_test,
     joint_tests = joint_tests,
     coef_stage1 = coef_stage1,
     coef_stage2 = coef_stage2
@@ -164,9 +175,9 @@ print.summary.tsco <- function(
 
   cat("\nSample size:\n")
   if (isTRUE(x$grouped)) {
-    cat("  Groups: ", x$n_groups, "\n", sep = "")
+    cat("  Unique covariate patterns: ", x$n_groups, "\n", sep = "")
     cat("  Observations represented: ", x$n_obs, "\n", sep = "")
-    cat("  Groups contributing to stage 1: ", x$n_stage1_groups, "\n", sep = "")
+    cat("  Unique covariate patterns contributing to stage 1: ", x$n_stage1_groups, "\n", sep = "")
     cat("  Observations contributing to stage 1: ", x$n_stage1_obs, "\n", sep = "")
   } else {
     cat("  N: ", x$n_obs, "\n", sep = "")
@@ -195,21 +206,24 @@ print.summary.tsco <- function(
   }
   print(total_print, row.names = FALSE, right = FALSE)
 
-  cat("\nJoint Wald tests across stages:\n")
-  cat("  H0: all stage-specific coefficients for the term are zero\n")
-
-  if (is.null(x$joint_tests) || nrow(x$joint_tests) == 0L) {
-    cat("  No joint tests available.\n")
+  if(x$joint_test_type != "none") {
+    cat("\nJoint", x$joint_test_type, "tests across stages:\n")
+    cat("  H0: all stage-specific coefficients for the term are zero\n")
+    if (is.null(x$joint_tests) || nrow(x$joint_tests) == 0L) {
+      cat("  No joint tests available.\n")
+    } else {
+      stats::printCoefmat(
+        as.matrix(x$joint_tests),
+        digits = digits,
+        signif.stars = signif.stars,
+        na.print = "NA",
+        has.Pvalue = TRUE,
+        P.values = TRUE,
+        ...
+      )
+    }
   } else {
-    stats::printCoefmat(
-      as.matrix(x$joint_tests),
-      digits = digits,
-      signif.stars = signif.stars,
-      na.print = "NA",
-      has.Pvalue = TRUE,
-      P.values = TRUE,
-      ...
-    )
+    cat("\nNo joint tests performed.\n")
   }
 
   cat("\nStage 1 coefficients: ")

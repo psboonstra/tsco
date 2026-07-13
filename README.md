@@ -21,26 +21,25 @@ pak::pak("psboonstra/tsco")
 
 ## Example
 
-This is a basic example which shows you how to solve a common problem:
-
 ``` r
 library(tsco)
-wine_fmla <- as.formula(cbind(bitter1, bitter2, bitter3, bitter4, bitter5) ~ temp + contact)
+library(VGAM) # for wine data
+data(wine)
 
-# Multinomial model using VGAM
-vglm(wine_fmla, family = multinomial, data = wine)
-
-# Proportional odds model using VGAM
-vglm(wine_fmla, family = cumulative(link = "logitlink", parallel = T, reverse = F), data = wine)
-
-#
-tsco(
-  wine_fmla,
-  data = wine,
-  cutoff_level = "bitter4",
-  stage1 = "po",
-  stage2 = "po"
-)
+# Multinomial for Y | Y < bitter4
+# Proportional odds for {Y < bitter 4, bitter 4, bitter 5}
+tsco_ex <-
+  tsco(
+    formula = cbind(bitter1, bitter2, bitter3, bitter4, bitter5) ~ temp + contact,
+    data = wine,
+    cutoff_level = "bitter4",
+    stage1 = "po",
+    stage2 = "multinomial"
+  )
  
+#  
+summary(tsco_ex)
+
+predict(tsco_ex)
 ```
 

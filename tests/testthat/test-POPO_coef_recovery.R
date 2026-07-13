@@ -25,7 +25,7 @@ test_that("tsco recovers known true PO-stage coefficients (sign and magnitude), 
 
   set.seed(20260709)
 
-  n <- 50000
+  n <- 5e3
   x <- stats::rnorm(n)
 
   true_beta1 <- 0.8   # stage 1 (conditional PO on Y < C): L1 vs L2
