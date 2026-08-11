@@ -1,18 +1,22 @@
 #' Extract coefficients from a TSCO model
 #'
-#' Coefficients are reported in the manuscript's parameterization
-#' (Pr(Y >= k | X) = expit(alpha_k - x'beta) for PO stages;
-#' Pr(Y = k | X) ~ exp(alpha_k - x'beta_k) for multinomial stages), which
-#' may require sign-correcting the raw VGAM fit's coefficients; see
+#' Multinomial coefficients are reported in the manuscript's parameterization,
+#' `Pr(Y = k | X) ~ exp(alpha_k - x'beta_k)`. For PO stages, covariate
+#' coefficients use the manuscript's sign convention, while thresholds use the
+#' common lower-tail convention
+#' `Pr(Y <= j | X) = expit(gamma_j + x'beta)` across fitting engines. Relative
+#' to manuscript cutpoints defined by
+#' `Pr(Y >= k | X) = expit(alpha_k - x'beta)`, `gamma_j = -alpha_(j + 1)`.
+#' Raw stage-fit coefficients are sign-corrected as needed; see
 #' `.tsco_sign_vector()` for the derivation.
 #'
 #' @param object An object of class `"tsco"`.
 #' @param stage Which stage to extract: `"both"`, `"stage1"`, or `"stage2"`.
 #' @param ... Ignored.
 #'
-#' @return A named numeric vector of coefficients on the TSCO/manuscript scale.
-#'   If `stage = "both"`, coefficient names are prefixed by `"stage1:"` and
-#'   `"stage2:"`.
+#' @return A named numeric vector on the reported coefficient scale described
+#'   above. If `stage = "both"`, coefficient names are prefixed by `"stage1:"`
+#'   and `"stage2:"`.
 #'
 #' @method coef tsco
 #' @export
@@ -25,13 +29,13 @@ coef.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   s1 <- .tsco_sign_vector(
     object$fit_stage1,
     kind = object$stage1,
-    po.reverse = object$po.reverse
+    engine = object$stage1_engine
   )
 
   s2 <- .tsco_sign_vector(
     object$fit_stage2,
     kind = object$stage2,
-    po.reverse = object$po.reverse
+    engine = object$stage2_engine
   )
 
   b1 <- b1_raw * s1

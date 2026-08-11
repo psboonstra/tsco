@@ -14,14 +14,23 @@
 \item{...}{Ignored.}
 }
 \value{
-A variance-covariance matrix on the TSCO/manuscript coefficient
-scale. If \code{stage = "both"}, the returned matrix is block diagonal.
+A variance-covariance matrix on the reported coefficient scale
+described above. If \code{stage = "both"}, the returned matrix is block
+diagonal.
 }
 \description{
-Reported on the same sign-corrected scale as \code{coef.tsco()}. If a stage's
-coefficients required a sign flip to match the manuscript's
-parameterization (see \code{.tsco_sign_vector()}), the covariance matrix is
-transformed as \verb{V_new = D V_old D}, where \code{D} is the diagonal +-1 sign
-matrix -- not simply negated -- so that cross terms between flipped and
-unflipped coefficients (e.g. an intercept and a slope) remain correct.
+Reported on the same sign-corrected scale as \code{coef.tsco()}: manuscript-scale
+multinomial coefficients, and manuscript-sign covariate coefficients plus
+common lower-tail thresholds for PO stages. If coefficients require a sign
+flip (see \code{.tsco_sign_vector()}), the covariance matrix is transformed as
+\verb{V_new = D V_old D}, where \code{D} is the diagonal +-1 sign matrix -- not simply
+negated -- so that cross terms between flipped and unflipped coefficients
+remain correct.
+}
+\details{
+For \code{rms::orm()} stages, all threshold covariances are requested. If an
+\code{orm} fit stores only a reduced covariance matrix and the complete matrix
+cannot be recovered, unavailable threshold rows and columns are returned as
+\code{NA}; slope covariance entries remain available when supplied by the fit.
+Joint Wald tests exclude threshold rows.
 }

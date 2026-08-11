@@ -21,3 +21,12 @@ An object of class \code{"summary.tsco"}.
 \description{
 Produces a concise statistical summary of both fitted TSCO stages.
 }
+\details{
+Likelihood-ratio tests can be preferable to Wald tests when coefficient
+estimates are unstable, but they do not resolve complete or quasi-complete
+separation. If a stage's maximum-likelihood estimate is attained only at
+infinity, both Wald inference and the ordinary chi-squared reference
+distribution for likelihood-ratio tests may be unreliable. Inspect
+convergence diagnostics and coefficient estimates before interpreting either
+test; \code{summary.tsco()} does not automatically detect or correct separation.
+}

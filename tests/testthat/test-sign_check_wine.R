@@ -23,14 +23,12 @@ test_that("coef.tsco and vcov.tsco apply documented sign correction for all stag
 
     s1 <- .tsco_sign_vector(
       fit$fit_stage1,
-      kind = fit$stage1,
-      po.reverse = fit$po.reverse
+      kind = fit$stage1
     )
 
     s2 <- .tsco_sign_vector(
       fit$fit_stage2,
-      kind = fit$stage2,
-      po.reverse = fit$po.reverse
+      kind = fit$stage2
     )
 
     expect_equal(coef(fit, stage = "stage1"), b1_raw * s1)
@@ -40,8 +38,7 @@ test_that("coef.tsco and vcov.tsco apply documented sign correction for all stag
 
     s2 <- .tsco_sign_vector(
       fit$fit_stage2,
-      kind = fit$stage2,
-      po.reverse = fit$po.reverse
+      kind = fit$stage2
     )
 
     if (!is.null(rownames(V2_raw))) {

@@ -1,37 +1,49 @@
 #' Variance-covariance matrix for a TSCO model
 #'
-#' Reported on the same sign-corrected scale as `coef.tsco()`. If a stage's
-#' coefficients required a sign flip to match the manuscript's
-#' parameterization (see `.tsco_sign_vector()`), the covariance matrix is
-#' transformed as `V_new = D V_old D`, where `D` is the diagonal +-1 sign
-#' matrix -- not simply negated -- so that cross terms between flipped and
-#' unflipped coefficients (e.g. an intercept and a slope) remain correct.
+#' Reported on the same sign-corrected scale as `coef.tsco()`: manuscript-scale
+#' multinomial coefficients, and manuscript-sign covariate coefficients plus
+#' common lower-tail thresholds for PO stages. If coefficients require a sign
+#' flip (see `.tsco_sign_vector()`), the covariance matrix is transformed as
+#' `V_new = D V_old D`, where `D` is the diagonal +-1 sign matrix -- not simply
+#' negated -- so that cross terms between flipped and unflipped coefficients
+#' remain correct.
+#'
+#' For `rms::orm()` stages, all threshold covariances are requested. If an
+#' `orm` fit stores only a reduced covariance matrix and the complete matrix
+#' cannot be recovered, unavailable threshold rows and columns are returned as
+#' `NA`; slope covariance entries remain available when supplied by the fit.
+#' Joint Wald tests exclude threshold rows.
 #'
 #' @param object An object of class `"tsco"`.
 #' @param stage Which stage to extract: `"both"`, `"stage1"`, or `"stage2"`.
 #' @param ... Ignored.
 #'
-#' @return A variance-covariance matrix on the TSCO/manuscript coefficient
-#'   scale. If `stage = "both"`, the returned matrix is block diagonal.
+#' @return A variance-covariance matrix on the reported coefficient scale
+#'   described above. If `stage = "both"`, the returned matrix is block
+#'   diagonal.
 #'
 #' @method vcov tsco
 #' @export
 vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   stage <- match.arg(stage)
 
-  V1_raw <- as.matrix(stats::vcov(object$fit_stage1))
-  V2_raw <- as.matrix(stats::vcov(object$fit_stage2))
+  V1_raw <- .tsco_stage_vcov(object$fit_stage1)
+  V2_raw <- .tsco_stage_vcov(object$fit_stage2)
+
+  if (is.null(V1_raw) || is.null(V2_raw)) {
+    stop("Could not extract a covariance matrix for each TSCO stage.", call. = FALSE)
+  }
 
   s1 <- .tsco_sign_vector(
     object$fit_stage1,
     kind = object$stage1,
-    po.reverse = object$po.reverse
+    engine = object$stage1_engine
   )
 
   s2 <- .tsco_sign_vector(
     object$fit_stage2,
     kind = object$stage2,
-    po.reverse = object$po.reverse
+    engine = object$stage2_engine
   )
 
   # Align sign vectors to covariance matrix names when possible.

@@ -1,3 +1,33 @@
+test_that("Wald tests combine all coefficients belonging to a formula term", {
+  dat <- data.frame(
+    grp = factor(rep(c("A", "B", "C"), each = 80)),
+    z = factor(rep(rep(c("low", "high"), each = 40), 3)),
+    y = ordered(
+      rep(c("a", "b", "c", "d"), 60),
+      levels = c("a", "b", "c", "d")
+    )
+  )
+
+  for (engine in c("auto", "vglm")) {
+    fit <- tsco(
+      y ~ grp + z + grp:z,
+      data = dat,
+      cutoff_level = "c",
+      stage1 = "po",
+      stage2 = "po",
+      po_engine = engine,
+      warn_degenerate = FALSE
+    )
+
+    wald <- summary(fit, joint_test = "Wald")$joint_tests
+
+    expect_identical(rownames(wald), c("grp", "z", "grp:z"))
+    expect_equal(wald$df, c(4, 2, 4))
+    expect_equal(sum(!is.finite(wald$Chisq)), 0L)
+  }
+})
+
+
 test_that("summary joint_test argument works", {
   dat <- make_wine_test_data()
 

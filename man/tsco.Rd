@@ -11,11 +11,12 @@ tsco(
   levels = NULL,
   stage1 = c("po", "multinomial"),
   stage2 = c("multinomial", "po"),
-  po.reverse = FALSE,
+  po_engine = c("auto", "orm", "vglm"),
+  stage1_args = list(),
+  stage2_args = list(),
   weights = NULL,
   na.action = stats::na.omit,
-  warn_degenerate = TRUE,
-  ...
+  warn_degenerate = TRUE
 )
 }
 \arguments{
@@ -40,39 +41,65 @@ columns into ordinal order. For grouped count data without column names,
 \item{stage1}{Model for the conditional lower partition Y | Y < C.
 Either "po" for proportional odds or "multinomial".}
 
-\item{stage2}{Model for the collapsed marginal outcome \{Y < C, C, ..., K - 1\}.
-Either "multinomial" or "po".}
+\item{stage2}{Model for the collapsed marginal outcome formed by combining
+all levels below the cutoff with C, ..., K - 1. Either "multinomial" or
+"po".}
 
-\item{po.reverse}{Logical. Passed to VGAM::cumulative(reverse = ...).
-The default FALSE matches the manuscript's parameterization,
-Pr(Y >= k | X) = expit(alpha_k - x'beta): under VGAM's convention,
-reverse = FALSE models Pr(Y <= j) = expit(alpha_j + x'beta), which is
-algebraically equivalent to Pr(Y >= j+1) = expit(-alpha_j - x'beta),
-giving the correct sign on x'beta once cutpoints are relabeled.
-reverse = TRUE would instead return the negative of the manuscript's
-beta for every PO-family stage.}
+\item{po_engine}{Engine for proportional-odds stages. \code{"auto"} (the
+default) uses \code{\link[rms:orm]{rms::orm()}} for individual-level responses and
+\code{\link[VGAM:vglm]{VGAM::vglm()}} for grouped-count responses. \code{"orm"} explicitly requests
+\code{\link[rms:orm]{rms::orm()}} and errors for grouped-count PO stages; \code{"vglm"} always uses
+\code{\link[VGAM:vglm]{VGAM::vglm()}}.}
 
-\item{weights}{Optional numeric case weights.}
+\item{stage1_args}{Named list of additional arguments passed only to the
+selected stage-1 fitter. Names must be unique and cannot be \code{formula},
+\code{data}, \code{family}, \code{weights}, or \code{na.action}, which are controlled by
+\code{tsco()}. These arguments are reused for reduced-model likelihood-ratio
+test refits, so arguments tied to the full model's parameter dimension may
+prevent those tests from being calculated.}
+
+\item{stage2_args}{Named list of additional arguments passed only to the
+selected stage-2 fitter, with the same restrictions and likelihood-ratio
+refit behavior as \code{stage1_args}.}
+
+\item{weights}{Optional finite, nonnegative multiplicative case weights with
+at least one positive value. For grouped responses, a weight multiplies the
+complete count contribution from that covariate pattern.}
 
 \item{na.action}{Missing-data action passed to model.frame().}
 
-\item{warn_degenerate}{If TRUE, warn when K = 3, which reduces to two binary regressions.}
-
-\item{...}{Additional arguments passed to VGAM::vglm().}
+\item{warn_degenerate}{If TRUE, warn when K = 3, which reduces to two binary
+regressions.}
 }
 \value{
 An object of class "tsco".
 }
 \description{
-Fits a two-stage conditional odds model for an ordinal outcome using
-VGAM::vglm().
+Fits a two-stage conditional odds model for an ordinal outcome. Backend
+selection is automatic: individual-level proportional-odds stages use
+\code{\link[rms:orm]{rms::orm()}}, while all multinomial or grouped-count stages use
+\code{\link[VGAM:vglm]{VGAM::vglm()}}. Set \code{po_engine = "orm"} or \code{po_engine = "vglm"} to
+explicitly request an engine for proportional-odds stages.
 }
 \details{
-The outcome is partitioned at a user-specified cutoff C.
-Stage 1 models Y | Y < C. Stage 2 models the collapsed outcome
-{Y < C, C, ..., K - 1}.
+The outcome is partitioned at a user-specified cutoff C. Stage 1 models
+Y | Y < C. Stage 2 models a collapsed outcome that combines all categories
+below C with C, ..., K - 1.
 
 The response may be either an individual-level ordinal outcome or a grouped
 count response supplied using cbind(), as in
 cbind(normal, mild, severe) ~ x.
 }
+\section{Limitations}{
+
+Prediction-time stage-1 support checks compare factor levels marginally and
+do not detect absent combinations of observed levels induced by interaction
+terms. See \code{\link[=predict.tsco]{predict.tsco()}} for details.
+
+Complete or quasi-complete separation in either fitted stage can yield
+infinite or unstable maximum-likelihood estimates. Likelihood-ratio tests do
+not remove this problem, and their ordinary chi-squared reference
+distribution may be unreliable under separation. The package does not
+automatically detect or correct separation.
+}
+

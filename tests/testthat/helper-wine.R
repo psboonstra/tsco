@@ -3,9 +3,9 @@ make_wine_test_data <- function() {
   skip_if_not_installed("dplyr")
   skip_if_not_installed("tidyr")
 
-  data(wine, package = "ordinal")
-
-  wine <- as.data.frame(wine)
+  wine_env <- new.env(parent = emptyenv())
+  utils::data("wine", package = "ordinal", envir = wine_env)
+  wine <- as.data.frame(wine_env$wine)
 
   # Ensure response is ordered and levels are character.
   wine$rating <- ordered(

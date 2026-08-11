@@ -4,11 +4,13 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-This is R package fits two-stage conditional odds (tsco) models as described
-in Boonstra, et al. (2026). Much of the heavy lifting is done by VGAM, and the 
-code follows the general semantic structure of `vglm`. A new class of model
-`tsco` is created, which is essentially two `vglm` objects appropriately packaged
-together. 
+This R package fits two-stage conditional odds (tsco) models as described
+in Boonstra, et al. (2026). Backend selection is automatic by default:
+individual-level proportional-odds stages use `rms::orm()`, while multinomial
+and grouped-count stages use `VGAM::vglm()`. Set `po_engine = "orm"` or
+`po_engine = "vglm"` to explicitly request a proportional-odds engine; requesting
+ORM for a grouped-count PO stage produces an error. A `tsco` object packages the
+two fitted stage models together.
 
 ## Installation
 

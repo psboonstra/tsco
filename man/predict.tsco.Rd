@@ -8,6 +8,7 @@
   object,
   newdata = NULL,
   type = c("prob", "response", "class", "stage"),
+  unsupported_stage1 = c("partial", "uniform", "empirical", "na"),
   ...
 )
 }
@@ -20,17 +21,29 @@ or grouped covariate patterns.}
 
 \item{type}{Prediction type. \code{"prob"} and \code{"response"} return unconditional
 category probabilities. \code{"class"} returns the most probable outcome
-category. \code{"stage"} returns stage-specific probabilities and combined
-unconditional probabilities.}
+category. \code{"stage"} returns stage-specific probabilities, combined
+unconditional probabilities, the stage-2 lower-partition mass, and an
+indicator of rows unsupported by the stage-1 model.}
 
-\item{...}{Additional arguments passed to \code{predict()} for the underlying
-\code{VGAM::vglm} fits.}
+\item{unsupported_stage1}{How to handle prediction rows whose factor levels
+were not represented in the stage-1 fitting data. Options are:
+\code{"partial"}: return \code{NA} for unidentified lower-category probabilities
+but retain identifiable upper-category probabilities;
+\code{"uniform"}: split the stage-2 lower-partition probability equally across
+lower categories;
+\code{"empirical"}: split the lower-partition probability according to the
+empirical lower-category distribution among stage-1 observations;
+\code{"na"}: return \code{NA} for the entire probability row.}
+
+\item{...}{Must be empty. Backend-specific prediction arguments are not
+supported because a TSCO model can use different engines across stages.}
 }
 \value{
 If \code{type = "prob"} or \code{"response"}, a matrix of predicted
 probabilities with one column per original outcome level. If
 \code{type = "class"}, an ordered factor. If \code{type = "stage"}, a list with
-stage-specific and combined probabilities.
+stage-specific probabilities, combined probabilities, lower-partition
+mass, \code{unsupported_stage1}, and the unsupported-row handling method.
 }
 \description{
 Computes predicted probabilities or predicted classes from a fitted
@@ -46,4 +59,17 @@ For lower-partition categories, unconditional probabilities are computed as
 
 For upper-partition categories, probabilities are taken directly from the
 stage-2 collapsed model.
+
+If a prediction row contains a factor level that was observed in the full
+analysis data but not represented among the observations contributing to the
+stage-1 model, then the conditional lower-partition probabilities are not
+identifiable for that row. The \code{unsupported_stage1} argument controls how
+such rows are handled.
+
+Stage-1 support is currently checked marginally for each factor: a row is
+flagged when one of its factor levels was absent from the stage-1 fitting
+data. This check does not detect an unobserved combination of otherwise
+observed factor levels in a model containing interactions such as \code{x1 * x2}.
+Predictions for such combinations may therefore be treated as supported and
+should be regarded as model-based extrapolations.
 }

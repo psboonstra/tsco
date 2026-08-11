@@ -1,3 +1,52 @@
+test_that("negative LRT statistics are cleaned or rejected", {
+  tiny <- .tsco_clean_lrt(-1e-9, "x")
+  material <- .tsco_clean_lrt(-1e-4, "x")
+
+  expect_equal(tiny$value, 0)
+  expect_identical(tiny$problem, NA_character_)
+  expect_identical(material$value, NA_real_)
+  expect_match(material$problem, "reduced model had a larger log-likelihood")
+})
+
+
+test_that("failed reduced LRT fits retain diagnostic information", {
+  dat <- make_wine_test_data()
+
+  fit <- tsco(
+    dat$grouped_formula,
+    data = dat$grouped,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
+    stage1 = "po",
+    stage2 = "po",
+    warn_degenerate = FALSE
+  )
+
+  # Deliberately make reduced stage-1 refits fail. This modifies only the
+  # stored refit data; the already fitted full model remains valid.
+  fit$data_stage1$.tsco_y_stage1 <- NULL
+
+  expect_warning(
+    lrt <- summary(fit, joint_test = "LRT")$joint_tests,
+    "Joint likelihood-ratio test problems"
+  )
+
+  # Both formula terms should have failed because every reduced stage-1 model
+  # requires the removed response.
+  expect_true(all(is.na(lrt$Chisq)))
+  expect_true(all(is.na(lrt$df)))
+  expect_true(all(is.na(lrt[["Pr(>Chisq)"]])))
+
+  errors <- attr(lrt, "errors")
+
+  expect_false(is.null(errors))
+  expect_identical(names(errors), c("temp", "contact"))
+  expect_length(errors, 2L)
+  expect_true(all(nzchar(errors)))
+})
+
+
+
 test_that("LRT in summary matches manual reduced-model refit", {
   dat <- make_wine_test_data()
 
@@ -37,30 +86,29 @@ test_that("LRT in summary matches manual reduced-model refit", {
   f1_reduced <- .tsco_drop_term_formula(fit$stage1_formula, term)
   f2_reduced <- .tsco_drop_term_formula(fit$stage2_formula, term)
 
-  fam1 <- .tsco_make_family(fit$stage1, po.reverse = fit$po.reverse)
-  fam2 <- .tsco_make_family(fit$stage2, po.reverse = fit$po.reverse)
-
-  fit1_reduced <- .tsco_fit_vglm_internal(
+  fit1_reduced <- .tsco_fit_stage(
     formula = f1_reduced,
-    family = fam1,
+    kind = fit$stage1,
+    engine = fit$stage1_engine,
     data = fit$data_stage1,
     weights = fit$weights_stage1,
-    vglm_args = fit$vglm_args
+    stage_args = fit$stage1_args
   )
 
-  fit2_reduced <- .tsco_fit_vglm_internal(
+  fit2_reduced <- .tsco_fit_stage(
     formula = f2_reduced,
-    family = fam2,
+    kind = fit$stage2,
+    engine = fit$stage2_engine,
     data = fit$data_stage2,
     weights = fit$weights_stage2,
-    vglm_args = fit$vglm_args
+    stage_args = fit$stage2_args
   )
 
-  ll_full <- .tsco_vglm_loglik(fit$fit_stage1) +
-    .tsco_vglm_loglik(fit$fit_stage2)
+  ll_full <- .tsco_stage_loglik(fit$fit_stage1, fit$stage1_engine) +
+    .tsco_stage_loglik(fit$fit_stage2, fit$stage2_engine)
 
-  ll_reduced <- .tsco_vglm_loglik(fit1_reduced) +
-    .tsco_vglm_loglik(fit2_reduced)
+  ll_reduced <- .tsco_stage_loglik(fit1_reduced, fit$stage1_engine) +
+    .tsco_stage_loglik(fit2_reduced, fit$stage2_engine)
 
   lrt_manual <- 2 * (ll_full - ll_reduced)
 
@@ -80,5 +128,59 @@ test_that("LRT in summary matches manual reduced-model refit", {
     s$joint_tests[term, "df"],
     df_manual
   )
+})
 
+
+test_that("mixed-backend LRT matches independent manual refits", {
+  skip_if_not_installed("rms")
+  skip_if_not_installed("VGAM")
+
+  dat <- make_wine_test_data()
+
+  fit <- tsco(
+    dat$individual_formula,
+    data = dat$individual,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
+    stage1 = "po",
+    stage2 = "multinomial",
+    warn_degenerate = FALSE
+  )
+
+  expect_identical(fit$stage1_engine, "orm")
+  expect_identical(fit$stage2_engine, "vglm")
+
+  term <- "contact"
+  f1_reduced <- stats::update(fit$stage1_formula, paste(". ~ . -", term))
+  f2_reduced <- stats::update(fit$stage2_formula, paste(". ~ . -", term))
+
+  fit1_reduced <- rms::orm(
+    f1_reduced,
+    data = fit$data_stage1,
+    family = "logistic"
+  )
+  fit2_reduced <- VGAM::vglm(
+    f2_reduced,
+    data = fit$data_stage2,
+    family = VGAM::multinomial(refLevel = 1)
+  )
+
+  ll_full <- as.numeric(stats::logLik(fit$fit_stage1)) +
+    as.numeric(stats::logLik(fit$fit_stage2))
+  ll_reduced <- as.numeric(stats::logLik(fit1_reduced)) +
+    as.numeric(stats::logLik(fit2_reduced))
+
+  lrt_manual <- 2 * (ll_full - ll_reduced)
+  df_manual <-
+    length(stats::coef(fit$fit_stage1)) - length(stats::coef(fit1_reduced)) +
+    length(stats::coef(fit$fit_stage2)) - length(stats::coef(fit2_reduced))
+
+  joint_tests <- summary(fit, joint_test = "LRT")$joint_tests
+
+  expect_equal(
+    joint_tests[term, "Chisq"],
+    lrt_manual,
+    tolerance = 1e-8
+  )
+  expect_equal(joint_tests[term, "df"], df_manual)
 })

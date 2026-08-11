@@ -14,14 +14,18 @@
 \item{...}{Ignored.}
 }
 \value{
-A named numeric vector of coefficients on the TSCO/manuscript scale.
-If \code{stage = "both"}, coefficient names are prefixed by \code{"stage1:"} and
-\code{"stage2:"}.
+A named numeric vector on the reported coefficient scale described
+above. If \code{stage = "both"}, coefficient names are prefixed by \code{"stage1:"}
+and \code{"stage2:"}.
 }
 \description{
-Coefficients are reported in the manuscript's parameterization
-(Pr(Y >= k | X) = expit(alpha_k - x'beta) for PO stages;
-Pr(Y = k | X) ~ exp(alpha_k - x'beta_k) for multinomial stages), which
-may require sign-correcting the raw VGAM fit's coefficients; see
+Multinomial coefficients are reported in the manuscript's parameterization,
+\verb{Pr(Y = k | X) ~ exp(alpha_k - x'beta_k)}. For PO stages, covariate
+coefficients use the manuscript's sign convention, while thresholds use the
+common lower-tail convention
+\verb{Pr(Y <= j | X) = expit(gamma_j + x'beta)} across fitting engines. Relative
+to manuscript cutpoints defined by
+\verb{Pr(Y >= k | X) = expit(alpha_k - x'beta)}, \code{gamma_j = -alpha_(j + 1)}.
+Raw stage-fit coefficients are sign-corrected as needed; see
 \code{.tsco_sign_vector()} for the derivation.
 }

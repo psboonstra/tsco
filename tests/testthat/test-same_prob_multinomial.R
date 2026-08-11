@@ -25,33 +25,44 @@ test_that("tsco model produces same probabilities as standard multinomial in edg
       .groups = "drop"
     )
 
-  fit1 <- tsco(
-    cbind(y1, y2, y3, y4, y5) ~ x,
-    data = dat_grouped,
-    cutoff_level = "y5",
-    stage1 = "multinomial",
-    stage2 = "po"
+  # These grouped models are intentionally saturated over the two values of x.
+  # VGAM may warn about convergence at a half-step, but the test concerns only
+  # equivalence of fitted probabilities, not coefficient-based inference.
+
+  fit1 <- suppressWarnings(
+    tsco(
+      cbind(y1, y2, y3, y4, y5) ~ x,
+      data = dat_grouped,
+      cutoff_level = "y5",
+      stage1 = "multinomial",
+      stage2 = "po"
+    )
   )
+
 
   predict_fit1 <-
     predict(fit1, newdata = data.frame(x = c(0, 1)))
 
-  fit2 <- tsco(
-    cbind(y1, y2, y3, y4, y5) ~ x,
-    data = dat_grouped,
-    cutoff_level = "y5",
-    stage1 = "multinomial",
-    stage2 = "multinomial"
+  fit2 <- suppressWarnings(
+    tsco(
+      cbind(y1, y2, y3, y4, y5) ~ x,
+      data = dat_grouped,
+      cutoff_level = "y5",
+      stage1 = "multinomial",
+      stage2 = "multinomial"
+    )
   )
 
   predict_fit2 <-
     predict(fit2, newdata = data.frame(x = c(0, 1)))
 
 
-  fit3 <- VGAM::vglm(
-    cbind(y1, y2, y3, y4, y5) ~ x,
-    data = dat_grouped,
-    family = VGAM::multinomial(),
+  fit3 <- suppressWarnings(
+    VGAM::vglm(
+      cbind(y1, y2, y3, y4, y5) ~ x,
+      data = dat_grouped,
+      family = VGAM::multinomial()
+    )
   )
 
   predict_fit3 <-

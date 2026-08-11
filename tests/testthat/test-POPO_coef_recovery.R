@@ -1,4 +1,4 @@
-test_that("tsco recovers known true PO-stage coefficients (sign and magnitude), po.reverse = FALSE", {
+test_that("tsco recovers known true PO-stage coefficients", {
   skip_if_not_installed("VGAM")
 
   # -------------------------------------------------------------------------
@@ -16,11 +16,9 @@ test_that("tsco recovers known true PO-stage coefficients (sign and magnitude), 
   # below the cutoff or lands in "C"/"U2". Stage 1 (conditional, only defined
   # for subjects below the cutoff) then determines "L1" vs "L2".
   #
-  # With po.reverse = FALSE (the corrected default, confirmed by this test),
-  # the fitted x-coefficient in each stage should recover true_beta1 /
-  # true_beta2 in both sign and magnitude. This test previously ran with
-  # po.reverse = TRUE and caught a confirmed sign flip (fitted ~= -0.81 vs.
-  # true_beta1 = 0.8); this version guards against that regression.
+  # The fitted x-coefficient in each stage should recover true_beta1 /
+  # true_beta2 in both sign and magnitude. This guards the package's fixed
+  # coefficient convention across both PO backends.
   # -------------------------------------------------------------------------
 
   set.seed(20260709)
@@ -62,7 +60,6 @@ test_that("tsco recovers known true PO-stage coefficients (sign and magnitude), 
     cutoff_level = "C",
     stage1 = "po",
     stage2 = "po",
-    po.reverse = FALSE,
     warn_degenerate = FALSE
   )
 

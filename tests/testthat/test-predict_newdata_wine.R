@@ -51,4 +51,9 @@ test_that("predict.tsco works with newdata and matches VGAM", {
     tolerance = 1e-8,
     ignore_attr = TRUE
   )
+
+  expect_error(
+    predict(fit, newdata = nd, backend_option = TRUE),
+    regexp = "Additional prediction arguments are not supported"
+  )
 })

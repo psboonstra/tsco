@@ -2,6 +2,14 @@
 #'
 #' Produces a concise statistical summary of both fitted TSCO stages.
 #'
+#' Likelihood-ratio tests can be preferable to Wald tests when coefficient
+#' estimates are unstable, but they do not resolve complete or quasi-complete
+#' separation. If a stage's maximum-likelihood estimate is attained only at
+#' infinity, both Wald inference and the ordinary chi-squared reference
+#' distribution for likelihood-ratio tests may be unreliable. Inspect
+#' convergence diagnostics and coefficient estimates before interpreting either
+#' test; `summary.tsco()` does not automatically detect or correct separation.
+#'
 #' @param object An object of class `"tsco"`.
 #' @param joint_test Character string specifying the type of joint test to
 #'  perform across stages. Options are `"LRT"` for likelihood ratio test,
@@ -16,13 +24,13 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
   coef_stage1 <- .tsco_coef_table(
     object$fit_stage1,
     kind = object$stage1,
-    po.reverse = object$po.reverse
+    engine = object$stage1_engine
   )
 
   coef_stage2 <- .tsco_coef_table(
     object$fit_stage2,
     kind = object$stage2,
-    po.reverse = object$po.reverse
+    engine = object$stage2_engine
   )
 
   joint_test <- match.arg(joint_test)
@@ -57,8 +65,11 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
 
   component_fit <- data.frame(
     stage = c("Stage 1", "Stage 2"),
-    model = c(.tsco_model_label(object$stage1),
-              .tsco_model_label(object$stage2)),
+    model = c(
+      .tsco_model_label(object$stage1),
+      .tsco_model_label(object$stage2)
+    ),
+    engine = c(object$stage1_engine, object$stage2_engine),
     outcome = c(
       paste0("Y | Y < ", object$cutoff_level),
       paste0("{Y < ", object$cutoff_level, ", ",
@@ -101,9 +112,10 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
     lower_collapsed_label = object$lower_collapsed_label,
     stage1 = object$stage1,
     stage2 = object$stage2,
+    stage1_engine = object$stage1_engine,
+    stage2_engine = object$stage2_engine,
     stage1_label = .tsco_model_label(object$stage1),
     stage2_label = .tsco_model_label(object$stage2),
-    po.reverse = object$po.reverse,
     n = object$n_obs,
     n_obs = object$n_obs,
     n_groups = object$n_groups,
@@ -163,13 +175,13 @@ print.summary.tsco <- function(
   cat("\nModel structure:\n")
   cat(
     "  Stage 1: Y | Y < ", x$cutoff_level,
-    " using ", x$stage1_label, "\n",
+    " using ", x$stage1_label, " [", x$stage1_engine, "]\n",
     sep = ""
   )
   cat(
     "  Stage 2: collapsed outcome {Y < ", x$cutoff_level, ", ",
     paste(x$upper_levels, collapse = ", "),
-    "} using ", x$stage2_label, "\n",
+    "} using ", x$stage2_label, " [", x$stage2_engine, "]\n",
     sep = ""
   )
 
@@ -206,7 +218,7 @@ print.summary.tsco <- function(
   }
   print(total_print, row.names = FALSE, right = FALSE)
 
-  if(x$joint_test_type != "none") {
+  if (x$joint_test_type != "none") {
     cat("\nJoint", x$joint_test_type, "tests across stages:\n")
     cat("  H0: all stage-specific coefficients for the term are zero\n")
     if (is.null(x$joint_tests) || nrow(x$joint_tests) == 0L) {

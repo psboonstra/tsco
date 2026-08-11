@@ -1,11 +1,14 @@
 #' Fit a Two-Stage Conditional Odds (TSCO) Model
 #'
-#' Fits a two-stage conditional odds model for an ordinal outcome using
-#' VGAM::vglm().
+#' Fits a two-stage conditional odds model for an ordinal outcome. Backend
+#' selection is automatic: individual-level proportional-odds stages use
+#' [rms::orm()], while all multinomial or grouped-count stages use
+#' [VGAM::vglm()]. Set `po_engine = "orm"` or `po_engine = "vglm"` to
+#' explicitly request an engine for proportional-odds stages.
 #'
-#' The outcome is partitioned at a user-specified cutoff C.
-#' Stage 1 models Y | Y < C. Stage 2 models the collapsed outcome
-#' {Y < C, C, ..., K - 1}.
+#' The outcome is partitioned at a user-specified cutoff C. Stage 1 models
+#' Y | Y < C. Stage 2 models a collapsed outcome that combines all categories
+#' below C with C, ..., K - 1.
 #'
 #' The response may be either an individual-level ordinal outcome or a grouped
 #' count response supplied using cbind(), as in
@@ -27,20 +30,40 @@
 #'   `levels` is assumed to describe the existing cbind() column order.
 #' @param stage1 Model for the conditional lower partition Y | Y < C.
 #'   Either "po" for proportional odds or "multinomial".
-#' @param stage2 Model for the collapsed marginal outcome \{Y < C, C, ..., K - 1\}.
-#'   Either "multinomial" or "po".
-#' @param po.reverse Logical. Passed to VGAM::cumulative(reverse = ...).
-#'   The default FALSE matches the manuscript's parameterization,
-#'   Pr(Y >= k | X) = expit(alpha_k - x'beta): under VGAM's convention,
-#'   reverse = FALSE models Pr(Y <= j) = expit(alpha_j + x'beta), which is
-#'   algebraically equivalent to Pr(Y >= j+1) = expit(-alpha_j - x'beta),
-#'   giving the correct sign on x'beta once cutpoints are relabeled.
-#'   reverse = TRUE would instead return the negative of the manuscript's
-#'   beta for every PO-family stage.
-#' @param weights Optional numeric case weights.
+#' @param stage2 Model for the collapsed marginal outcome formed by combining
+#'   all levels below the cutoff with C, ..., K - 1. Either "multinomial" or
+#'   "po".
+#' @param po_engine Engine for proportional-odds stages. `"auto"` (the
+#'   default) uses [rms::orm()] for individual-level responses and
+#'   [VGAM::vglm()] for grouped-count responses. `"orm"` explicitly requests
+#'   [rms::orm()] and errors for grouped-count PO stages; `"vglm"` always uses
+#'   [VGAM::vglm()].
+#' @param stage1_args Named list of additional arguments passed only to the
+#'   selected stage-1 fitter. Names must be unique and cannot be `formula`,
+#'   `data`, `family`, `weights`, or `na.action`, which are controlled by
+#'   `tsco()`. These arguments are reused for reduced-model likelihood-ratio
+#'   test refits, so arguments tied to the full model's parameter dimension may
+#'   prevent those tests from being calculated.
+#' @param stage2_args Named list of additional arguments passed only to the
+#'   selected stage-2 fitter, with the same restrictions and likelihood-ratio
+#'   refit behavior as `stage1_args`.
+#' @param weights Optional finite, nonnegative multiplicative case weights with
+#'   at least one positive value. For grouped responses, a weight multiplies the
+#'   complete count contribution from that covariate pattern.
 #' @param na.action Missing-data action passed to model.frame().
-#' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary regressions.
-#' @param ... Additional arguments passed to VGAM::vglm().
+#' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary
+#'   regressions.
+#'
+#' @section Limitations:
+#' Prediction-time stage-1 support checks compare factor levels marginally and
+#' do not detect absent combinations of observed levels induced by interaction
+#' terms. See [predict.tsco()] for details.
+#'
+#' Complete or quasi-complete separation in either fitted stage can yield
+#' infinite or unstable maximum-likelihood estimates. Likelihood-ratio tests do
+#' not remove this problem, and their ordinary chi-squared reference
+#' distribution may be unreliable under separation. The package does not
+#' automatically detect or correct separation.
 #'
 #' @return An object of class "tsco".
 #' @export
@@ -51,22 +74,18 @@ tsco <- function(
     levels = NULL,
     stage1 = c("po", "multinomial"),
     stage2 = c("multinomial", "po"),
-    po.reverse = FALSE,
+    po_engine = c("auto", "orm", "vglm"),
+    stage1_args = list(),
+    stage2_args = list(),
     weights = NULL,
     na.action = stats::na.omit,
-    warn_degenerate = TRUE,
-    ...) {
-
-  if (!requireNamespace("VGAM", quietly = TRUE)) {
-    stop(
-      "Package 'VGAM' is required. Install it with install.packages('VGAM').",
-      call. = FALSE
-    )
-  }
+    warn_degenerate = TRUE) {
 
   stage1 <- match.arg(stage1)
   stage2 <- match.arg(stage2)
-  vglm_args <- list(...)
+  po_engine <- match.arg(po_engine)
+  stage1_args <- .tsco_validate_stage_args(stage1_args, "stage1_args")
+  stage2_args <- .tsco_validate_stage_args(stage2_args, "stage2_args")
 
   if (missing(data)) {
     data <- parent.frame()
@@ -103,6 +122,39 @@ tsco <- function(
   }
 
   cov_mf <- mf[, -response_col, drop = FALSE]
+
+  # Convert character predictors to factors using the full analysis dataset.
+  # This prevents character predictors from being re-leveled differently in
+  # stage 1 and stage 2 after subsetting.
+  char_predictors <- names(cov_mf)[
+    vapply(cov_mf, is.character, logical(1L))
+  ]
+
+  for (nm in char_predictors) {
+    cov_mf[[nm]] <- factor(
+      cov_mf[[nm]],
+      levels = sort(unique(cov_mf[[nm]]))
+    )
+  }
+  predict_data <- cov_mf
+
+  # Store factor metadata for prediction-time newdata preparation.
+  factor_predictors <- names(cov_mf)[
+    vapply(cov_mf, is.factor, logical(1L))
+  ]
+
+  predictor_levels <- lapply(cov_mf[factor_predictors], levels)
+  predictor_ordered <- lapply(cov_mf[factor_predictors], is.ordered)
+
+  # Levels actually observed in the full analysis data. Factor levels that are
+  # declared but never observed cannot support prediction.
+  predictor_observed_levels <- lapply(
+    cov_mf[factor_predictors],
+    function(z) {
+      lev <- levels(z)
+      lev[lev %in% as.character(z)]
+    }
+  )
 
   # Detect grouped/count response.
   is_grouped <- is.matrix(y) || is.data.frame(y)
@@ -282,8 +334,18 @@ tsco <- function(
 
   # Validate and align weights.
   if (!is.null(weights)) {
-    if (!is.numeric(weights)) {
+    if (!is.numeric(weights) || !is.null(dim(weights))) {
       stop("`weights` must be a numeric vector.", call. = FALSE)
+    }
+
+    if (length(weights) == 0L ||
+        any(!is.finite(weights)) ||
+        any(weights < 0) ||
+        !any(weights > 0)) {
+      stop(
+        "`weights` must be finite, nonnegative, and contain at least one positive value.",
+        call. = FALSE
+      )
     }
 
     if (length(weights) == nrow(mf)) {
@@ -315,35 +377,6 @@ tsco <- function(
       call("~", as.name(response_name), formula[[3L]]),
       env = environment(formula)
     )
-  }
-
-  # Helper to construct VGAM family.
-  make_family <- function(kind) {
-    if (kind == "po") {
-      VGAM::cumulative(
-        link = "logitlink",
-        parallel = TRUE,
-        reverse = po.reverse
-      )
-    } else if (kind == "multinomial") {
-      VGAM::multinomial(refLevel = 1)
-    }
-  }
-
-  # Model fitter.
-  fit_vglm <- function(form, fam, dat, w, ...) {
-    args <- list(
-      formula = form,
-      family = fam,
-      data = dat
-    )
-
-    if (!is.null(w)) {
-      args$weights <- w
-    }
-
-    args <- c(args, list(...))
-    do.call(VGAM::vglm, args)
   }
 
   # --------------------------------------------------------------------------
@@ -445,28 +478,89 @@ tsco <- function(
     w2 <- w_all
   }
 
-  # --------------------------------------------------------------------------
-  # Fit models.
-  # --------------------------------------------------------------------------
+  # Remove stage-1 factor levels with no contributing observations. Retaining
+  # their all-zero design columns can make orm fits singular. Full-data factor
+  # metadata remain stored separately for prediction support checks.
+  for (nm in intersect(factor_predictors, names(d1))) {
+    d1[[nm]] <- droplevels(d1[[nm]])
+  }
 
-  fit1 <- fit_vglm(
-    stage1_formula,
-    make_family(stage1),
-    d1,
-    w1,
-    ...
+  if (!is.null(w1) && !any(w1 > 0)) {
+    stop(
+      "`weights` must contain at least one positive value among observations contributing to stage 1.",
+      call. = FALSE
+    )
+  }
+
+  # Factor levels actually represented in the stage-1 fitting data.
+  # If a factor level is absent from stage 1, conditional probabilities
+  # Y | Y < C for that level are not identified from the stage-1 likelihood.
+  stage1_factor_levels <- lapply(
+    factor_predictors,
+    function(nm) {
+      if (nm %in% names(d1)) {
+        z <- d1[[nm]]
+
+        if (is.factor(z)) {
+          lev <- levels(z)
+          lev[lev %in% as.character(z)]
+        } else {
+          sort(unique(as.character(z)))
+        }
+      } else {
+        character()
+      }
+    }
   )
 
-  fit2 <- fit_vglm(
-    stage2_formula,
-    make_family(stage2),
-    d2,
-    w2,
-    ...
+  names(stage1_factor_levels) <- factor_predictors
+
+  # --------------------------------------------------------------------------
+  # Fit models. `orm()` is used only where it supports the response structure:
+  # individual-level proportional-odds stages. All other stages use VGAM.
+  # --------------------------------------------------------------------------
+
+  stage1_engine <- .tsco_stage_engine(
+    stage1,
+    grouped = is_grouped,
+    po_engine = po_engine
+  )
+  stage2_engine <- .tsco_stage_engine(
+    stage2,
+    grouped = is_grouped,
+    po_engine = po_engine
   )
 
-  p1_hat <- VGAM::predictvglm(fit1, type = "response")
-  p2_hat <- VGAM::predictvglm(fit2, type = "response")
+  fit1 <- .tsco_fit_stage(
+    formula = stage1_formula,
+    kind = stage1,
+    engine = stage1_engine,
+    data = d1,
+    weights = w1,
+    stage_args = stage1_args
+  )
+
+  fit2 <- .tsco_fit_stage(
+    formula = stage2_formula,
+    kind = stage2,
+    engine = stage2_engine,
+    data = d2,
+    weights = w2,
+    stage_args = stage2_args
+  )
+
+  p1_hat <- .tsco_predict_stage_prob(
+    fit1,
+    engine = stage1_engine,
+    newdata = d1,
+    levels = lower_levels
+  )
+  p2_hat <- .tsco_predict_stage_prob(
+    fit2,
+    engine = stage2_engine,
+    newdata = d2,
+    levels = collapsed_levels
+  )
 
   p1_hat <- .tsco_align_prob(p1_hat, lower_levels)
   p2_hat <- .tsco_align_prob(p2_hat, collapsed_levels)
@@ -501,18 +595,27 @@ tsco <- function(
     upper_levels = upper_levels,
     lower_collapsed_label = lower_collapsed_label,
     collapsed_levels = collapsed_levels,
-    po.reverse = po.reverse,
     grouped = is_grouped,
+    po_engine = po_engine,
+    stage1_engine = stage1_engine,
+    stage2_engine = stage2_engine,
     fit_stage1 = fit1,
     fit_stage2 = fit2,
 
     # For prediction and LRT refits
-    predict_data = d2,
+    predict_data = predict_data,
     data_stage1 = d1,
     data_stage2 = d2,
     weights_stage1 = w1,
     weights_stage2 = w2,
-    vglm_args = vglm_args,
+    stage1_args = stage1_args,
+    stage2_args = stage2_args,
+
+    # Predictor metadata for prediction
+    predictor_levels = predictor_levels,
+    predictor_ordered = predictor_ordered,
+    predictor_observed_levels = predictor_observed_levels,
+    stage1_factor_levels = stage1_factor_levels,
 
     # sample-size accounting
     n = n_obs,

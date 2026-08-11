@@ -2,18 +2,16 @@
 % Please edit documentation in R/utils-tsco.R
 \name{.tsco_coef_table}
 \alias{.tsco_coef_table}
-\title{Construct a stage-level coefficient table on the TSCO/manuscript scale.}
+\title{Construct a stage-level coefficient table on the reported TSCO scale.}
 \usage{
-.tsco_coef_table(fit, kind, po.reverse = FALSE)
+.tsco_coef_table(fit, kind, engine = NULL)
 }
 \arguments{
 \item{fit}{A fitted stage model (a "vglm" object).}
 
 \item{kind}{"po" or "multinomial", i.e. object$stage1 or object$stage2.}
 
-\item{po.reverse}{Logical. Whether PO stages were fit with
-\code{VGAM::cumulative(reverse = TRUE)}. If \code{TRUE}, non-intercept PO
-coefficients are sign-flipped to match the manuscript's beta convention.}
+\item{engine}{The stage fitting backend, either "orm" or "vglm".}
 }
 \description{
 Estimates and covariance matrices are transformed using \code{.tsco_sign_vector()}.

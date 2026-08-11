@@ -7,9 +7,13 @@
 #' * a conditional model for the lower partition, `Y | Y < C`;
 #' * a marginal model for the collapsed outcome `{Y < C, C, ..., K - 1}`.
 #'
-#' The package currently uses `VGAM::vglm()` to fit the component models.
-#' Each component may be specified as a proportional odds model or a
-#' multinomial model.
+#' Backend selection is automatic by default. Individual-level proportional-odds
+#' components use `rms::orm()`, which efficiently supports many ordered response
+#' levels, while grouped-count proportional-odds components use `VGAM::vglm()`.
+#' Set `po_engine = "orm"` or `po_engine = "vglm"` in [tsco()] to explicitly
+#' request an engine. Multinomial components always use `VGAM::vglm()`. Each
+#' component may be specified as a proportional odds model or a multinomial
+#' model.
 #'
 #' @section Main function:
 #'

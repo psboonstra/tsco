@@ -15,9 +15,13 @@ cutoff level and fit two component models:
 \item a marginal model for the collapsed outcome \verb{\{Y < C, C, ..., K - 1\}}.
 }
 
-The package currently uses \code{VGAM::vglm()} to fit the component models.
-Each component may be specified as a proportional odds model or a
-multinomial model.
+Backend selection is automatic by default. Individual-level proportional-odds
+components use \code{rms::orm()}, which efficiently supports many ordered response
+levels, while grouped-count proportional-odds components use \code{VGAM::vglm()}.
+Set \code{po_engine = "orm"} or \code{po_engine = "vglm"} in \code{\link[=tsco]{tsco()}} to explicitly
+request an engine. Multinomial components always use \code{VGAM::vglm()}. Each
+component may be specified as a proportional odds model or a multinomial
+model.
 }
 \section{Main function}{
 

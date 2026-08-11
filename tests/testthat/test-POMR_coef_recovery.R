@@ -36,7 +36,6 @@ test_that("tsco recovers known true multinomial-stage coefficients (simple, 1-pa
     cutoff_level = "C",
     stage1 = "po",
     stage2 = "multinomial",
-    po.reverse = FALSE,
     warn_degenerate = FALSE
   )
 
@@ -97,7 +96,6 @@ test_that("tsco recovers known true multinomial-stage coefficients (2-param case
     cutoff_level = "C",
     stage1 = "po",
     stage2 = "multinomial",
-    po.reverse = FALSE,
     warn_degenerate = FALSE
   )
 

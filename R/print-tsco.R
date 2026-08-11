@@ -22,14 +22,14 @@ print.tsco <- function(x, ...) {
 
   cat(
     "Stage 1: Y | Y < ", x$cutoff_level,
-    " using ", .tsco_model_label(x$stage1), "\n",
+    " using ", .tsco_model_label(x$stage1), " [", x$stage1_engine, "]\n",
     sep = ""
   )
 
   cat(
     "Stage 2: {Y < ", x$cutoff_level, ", ",
     paste(x$upper_levels, collapse = ", "),
-    "} using ", .tsco_model_label(x$stage2), "\n",
+    "} using ", .tsco_model_label(x$stage2), " [", x$stage2_engine, "]\n",
     sep = ""
   )
 

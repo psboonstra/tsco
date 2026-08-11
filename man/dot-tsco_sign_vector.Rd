@@ -2,48 +2,43 @@
 % Please edit documentation in R/utils-tsco.R
 \name{.tsco_sign_vector}
 \alias{.tsco_sign_vector}
-\title{Sign vector correcting a fitted stage's coefficients to the manuscript's
-parameterization.}
+\title{Sign vector correcting a fitted stage's coefficients to the reported TSCO
+scale.}
 \usage{
-.tsco_sign_vector(fit, kind, po.reverse = FALSE)
+.tsco_sign_vector(fit, kind, engine = NULL)
 }
 \arguments{
-\item{fit}{A fitted stage model (a "vglm" object).}
+\item{fit}{A fitted stage model.}
 
 \item{kind}{"po" or "multinomial", i.e. object$stage1 or object$stage2.}
 
-\item{po.reverse}{Logical. Whether PO stages were fit with
-\code{VGAM::cumulative(reverse = TRUE)}. If \code{TRUE}, non-intercept PO
-coefficients are sign-flipped to match the manuscript's beta convention.}
+\item{engine}{The stage fitting backend, either "orm" or "vglm".}
 }
 \value{
 A named numeric vector of +1/-1, same length and names as
 stats::coef(fit).
 }
 \description{
-The manuscript parameterizes both submodels with a subtractive
-convention on x'beta (Eq. 1 for PO, Eq. 2 for MR/multinomial). As
-actually called by tsco()'s make_family():
+The manuscript parameterizes both submodels with a subtractive convention
+on x'beta (Eq. 1 for PO, Eq. 2 for MR/multinomial). Multinomial coefficients
+are reported in that parameterization. For PO stages, covariate coefficients
+use the manuscript's sign convention, but thresholds use the common
+lower-tail representation \verb{Pr(Y <= j | X) = expit(gamma_j + x'beta)}.
+Thus \code{gamma_j = -alpha_(j + 1)} for manuscript upper-tail cutpoints. The
+required transformation depends on the selected fitting backend:
 \itemize{
-\item "po" (VGAM::cumulative(reverse = po.reverse)): with
-po.reverse = FALSE (the package default as of this fix), VGAM's
-Pr(Y <= j) = expit(alpha_j + x'beta) is algebraically equivalent to
-Pr(Y >= j+1) = expit(-alpha_j - x'beta), which already matches the
-manuscript's sign on x'beta once cutpoints are relabeled. No flip
-needed. (Confirmed by simulation in test-sign_recovery_simulation.R;
-if po.reverse is ever changed back to TRUE, this would need to
-change too.)
-\item "multinomial" (VGAM::multinomial(refLevel = 1)): uses the standard
-additive multinomial-logit convention, eta = alpha + x'beta, which
-is the \emph{opposite} sign of the manuscript's Eq. 2. Confirmed by
-simulation in test-multinomial_sign_recovery.R (recovered
-coefficient was the negative of the true simulated value). Every
-non-intercept coefficient needs flipping.
+\item "po" with \code{VGAM::cumulative(reverse = FALSE)} already uses the reported
+lower-tail representation, so no coefficients are flipped.
+\item "po" with \code{rms::orm()} uses the opposite-sign upper-tail representation.
+Negating the entire coefficient vector converts both thresholds and
+slopes to the reported lower-tail representation.
+\item "multinomial" with \code{VGAM::multinomial(refLevel = 1)} uses the additive
+convention \verb{eta = alpha + x'beta}. Every non-intercept coefficient is
+negated to obtain the manuscript's \verb{alpha - x'beta} convention.
 }
 }
 \details{
-This helper is the single point of control for that correction so that,
-if make_family()'s arguments ever change, there is one place to update
-the sign logic rather than several call sites (coef.tsco, vcov.tsco,
-summary.tsco).
+This helper is the single point of control for coefficient transformations,
+keeping the sign logic consistent across \code{coef.tsco()}, \code{vcov.tsco()}, and
+\code{summary.tsco()}.
 }
