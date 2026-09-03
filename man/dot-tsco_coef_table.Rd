@@ -4,14 +4,18 @@
 \alias{.tsco_coef_table}
 \title{Construct a stage-level coefficient table on the reported TSCO scale.}
 \usage{
-.tsco_coef_table(fit, kind, engine = NULL)
+.tsco_coef_table(fit, kind, engine = NULL, reported_names = NULL)
 }
 \arguments{
-\item{fit}{A fitted stage model (a "vglm" object).}
+\item{fit}{A fitted stage model (a "vglm" or "orm" object).}
 
 \item{kind}{"po" or "multinomial", i.e. object$stage1 or object$stage2.}
 
 \item{engine}{The stage fitting backend, either "orm" or "vglm".}
+
+\item{reported_names}{Optional character vector of reported coefficient
+names, named by the backend's own coefficient names, as returned by
+\code{.tsco_stage_reported_names()}.}
 }
 \description{
 Estimates and covariance matrices are transformed using \code{.tsco_sign_vector()}.

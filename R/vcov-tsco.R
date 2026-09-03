@@ -53,6 +53,37 @@ vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   V1 <- V1_raw * outer(s1, s1)
   V2 <- V2_raw * outer(s2, s2)
 
+  rn1 <- .tsco_apply_reported_names(
+    rownames(V1),
+    .tsco_stage_reported_names(
+      object$fit_stage1,
+      kind = object$stage1,
+      engine = object$stage1_engine,
+      response_levels = object$lower_levels,
+      formula = object$stage1_formula,
+      data = object$data_stage1,
+      collapsed_label = object$lower_collapsed_label,
+      cutoff_level = object$cutoff_level
+    )
+  )
+
+  rn2 <- .tsco_apply_reported_names(
+    rownames(V2),
+    .tsco_stage_reported_names(
+      object$fit_stage2,
+      kind = object$stage2,
+      engine = object$stage2_engine,
+      response_levels = object$collapsed_levels,
+      formula = object$stage2_formula,
+      data = object$data_stage2,
+      collapsed_label = object$lower_collapsed_label,
+      cutoff_level = object$cutoff_level
+    )
+  )
+
+  dimnames(V1) <- list(rn1, rn1)
+  dimnames(V2) <- list(rn2, rn2)
+
   if (stage == "stage1") {
     return(V1)
   }

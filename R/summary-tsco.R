@@ -8,7 +8,13 @@
 #' infinity, both Wald inference and the ordinary chi-squared reference
 #' distribution for likelihood-ratio tests may be unreliable. Inspect
 #' convergence diagnostics and coefficient estimates before interpreting either
-#' test; `summary.tsco()` does not automatically detect or correct separation.
+#' test.
+#'
+#' The returned object carries a `diagnostics` element reporting, per stage,
+#' whether the backend converged and whether any coefficient shows the
+#' magnitude-and-standard-error signature of complete or quasi-complete
+#' separation. `print()` shows these only when there is something to report.
+#' They are a warning that the numbers need scrutiny, not a correction.
 #'
 #' @param object An object of class `"tsco"`.
 #' @param joint_test Character string specifying the type of joint test to
@@ -24,13 +30,33 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
   coef_stage1 <- .tsco_coef_table(
     object$fit_stage1,
     kind = object$stage1,
-    engine = object$stage1_engine
+    engine = object$stage1_engine,
+    reported_names = .tsco_stage_reported_names(
+      object$fit_stage1,
+      kind = object$stage1,
+      engine = object$stage1_engine,
+      response_levels = object$lower_levels,
+      formula = object$stage1_formula,
+      data = object$data_stage1,
+      collapsed_label = object$lower_collapsed_label,
+      cutoff_level = object$cutoff_level
+    )
   )
 
   coef_stage2 <- .tsco_coef_table(
     object$fit_stage2,
     kind = object$stage2,
-    engine = object$stage2_engine
+    engine = object$stage2_engine,
+    reported_names = .tsco_stage_reported_names(
+      object$fit_stage2,
+      kind = object$stage2,
+      engine = object$stage2_engine,
+      response_levels = object$collapsed_levels,
+      formula = object$stage2_formula,
+      data = object$data_stage2,
+      collapsed_label = object$lower_collapsed_label,
+      cutoff_level = object$cutoff_level
+    )
   )
 
   joint_test <- match.arg(joint_test)
@@ -133,7 +159,19 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
     joint_test_type = joint_test,
     joint_tests = joint_tests,
     coef_stage1 = coef_stage1,
-    coef_stage2 = coef_stage2
+    coef_stage2 = coef_stage2,
+    diagnostics = list(
+      stage1 = .tsco_stage_diagnostics(
+        object$fit_stage1,
+        engine = object$stage1_engine,
+        coef_table = coef_stage1
+      ),
+      stage2 = .tsco_stage_diagnostics(
+        object$fit_stage2,
+        engine = object$stage2_engine,
+        coef_table = coef_stage2
+      )
+    )
   )
 
   class(out) <- "summary.tsco"
@@ -208,6 +246,11 @@ print.summary.tsco <- function(
     fit_print[[jj]] <- signif(fit_print[[jj]], digits)
   }
   print(fit_print, row.names = FALSE, right = FALSE)
+  cat(
+    "  Note: each stage's BIC uses that stage's own sample size, so the two\n",
+    "  component BICs do not sum to the combined BIC below.\n",
+    sep = ""
+  )
 
   cat("\nCombined fit statistics:\n")
   total_print <- x$total_fit
@@ -240,6 +283,16 @@ print.summary.tsco <- function(
 
   cat("\nStage 1 coefficients: ")
   cat("Y | Y < ", x$cutoff_level, "\n", sep = "")
+  cat(.tsco_scale_legend(x$stage1), sep = "")
+  if (identical(x$stage1, "multinomial")) {
+    cat(
+      "Reference category: Y = ",
+      x$lower_levels[1],
+      "\n",
+      sep = ""
+    )
+  }
+
 
   if (length(x$coef_stage1) == 0L) {
     cat("  No coefficient table available.\n")
@@ -256,6 +309,15 @@ print.summary.tsco <- function(
   cat("\nStage 2 coefficients: ")
   cat("collapsed outcome {Y < ", x$cutoff_level, ", ",
       paste(x$upper_levels, collapse = ", "), "}\n", sep = "")
+  cat(.tsco_scale_legend(x$stage2), sep = "")
+  if (identical(x$stage2, "multinomial")) {
+    cat(
+      "Reference category: Y < ",
+      x$cutoff_level,
+      "\n",
+      sep = ""
+    )
+  }
 
   if (length(x$coef_stage2) == 0L) {
     cat("  No coefficient table available.\n")
@@ -269,5 +331,67 @@ print.summary.tsco <- function(
     )
   }
 
+  .tsco_print_diagnostics(x$diagnostics)
+
   invisible(x)
+}
+
+#' One-line reminder of the reported coefficient scale for a stage.
+#'
+#' Both stage parameterizations subtract the linear predictor, following the
+#' manuscript, so a positive coefficient shifts probability toward *lower*
+#' outcome categories. That is the opposite of what most users expect from a
+#' regression table, and the two stages label their intercepts differently, so
+#' the convention is stated next to every printed table.
+#'
+#' @param kind "po" or "multinomial".
+.tsco_scale_legend <- function(kind) {
+  if (identical(kind, "multinomial")) {
+    return(paste0(
+      "Scale: Pr(Y = k | X) proportional to exp(alpha_k - x'beta_k); ",
+      "intercepts are alpha_k.\n",
+      "       A positive beta shifts probability toward lower categories.\n"
+    ))
+  }
+
+  paste0(
+    "Scale: Pr(Y >= k | X) = expit(alpha_k - x'beta); thresholds are printed ",
+    "on the\n       lower-tail scale, Y<=j meaning gamma_j = -alpha_(j+1).\n",
+    "       A positive beta shifts probability toward lower categories.\n"
+  )
+}
+
+#' Print convergence and separation diagnostics, when there are any.
+#'
+#' @param diagnostics The `diagnostics` element of a `summary.tsco` object.
+.tsco_print_diagnostics <- function(diagnostics) {
+  if (is.null(diagnostics)) {
+    return(invisible(NULL))
+  }
+
+  lines <- character()
+
+  for (stage in names(diagnostics)) {
+    d <- diagnostics[[stage]]
+
+    if (is.null(d) || length(d$messages) == 0L) {
+      next
+    }
+
+    label <- if (identical(stage, "stage1")) "Stage 1" else "Stage 2"
+    lines <- c(lines, paste0("  ", label, ": ", d$messages))
+  }
+
+  if (length(lines) == 0L) {
+    return(invisible(NULL))
+  }
+
+  cat("\nFit diagnostics:\n")
+  cat(lines, sep = "\n")
+  cat(
+    "\n  Wald tests and the chi-squared calibration of likelihood-ratio tests",
+    "\n  may be unreliable for the affected coefficients.\n"
+  )
+
+  invisible(NULL)
 }

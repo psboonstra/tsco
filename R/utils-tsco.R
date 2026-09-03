@@ -100,7 +100,8 @@
 .tsco_stage_coef_table <- function(
     fit,
     kind,
-    engine = NULL) {
+    engine = NULL,
+    reported_names = NULL) {
   b_raw <- tryCatch(stats::coef(fit), error = function(e) NULL)
   V_raw <- .tsco_stage_vcov(fit)
 
@@ -148,8 +149,32 @@
     `Pr(>|z|)` = p
   )
 
-  rownames(out) <- names(b)
+  rownames(out) <- .tsco_apply_reported_names(names(b), reported_names)
   out
+}
+
+#' Look up reported names for a (possibly reordered) subset of coefficients.
+#'
+#' @param coef_names The backend's coefficient names, in the order wanted.
+#' @param reported_names A character vector of reported names, named by the
+#'   backend's coefficient names, as returned by
+#'   `.tsco_stage_reported_names()`.
+.tsco_apply_reported_names <- function(coef_names, reported_names) {
+  if (is.null(reported_names) || is.null(names(reported_names))) {
+    return(coef_names)
+  }
+
+  out <- reported_names[coef_names]
+
+  if (anyNA(out)) {
+    stop(
+      "Internal error: could not map coefficient names to reported names: ",
+      paste(coef_names[is.na(out)], collapse = ", "),
+      call. = FALSE
+    )
+  }
+
+  unname(out)
 }
 
 #' Construct a stage-level coefficient table on the reported TSCO scale.
@@ -158,14 +183,23 @@
 #' Standard errors and p-values are computed from the transformed covariance
 #' matrix.
 #'
-#' @param fit A fitted stage model (a "vglm" object).
+#' @param fit A fitted stage model (a "vglm" or "orm" object).
 #' @param kind "po" or "multinomial", i.e. object$stage1 or object$stage2.
 #' @param engine The stage fitting backend, either "orm" or "vglm".
-.tsco_coef_table <- function(fit, kind, engine = NULL) {
+#' @param reported_names Optional character vector of reported coefficient
+#'   names, named by the backend's own coefficient names, as returned by
+#'   `.tsco_stage_reported_names()`.
+.tsco_coef_table <- function(
+    fit,
+    kind,
+    engine = NULL,
+    reported_names = NULL) {
+
   .tsco_stage_coef_table(
     fit = fit,
     kind = kind,
-    engine = engine
+    engine = engine,
+    reported_names = reported_names
   )
 }
 
@@ -361,8 +395,41 @@
     return(p[, levels, drop = FALSE])
   }
 
-  # Last-resort positional fallback. This handles cases where VGAM returns
-  # probabilities in the correct order but with transformed/syntactic names.
+  # `rms::predict.orm(type = "fitted.ind")` prefixes every column with the
+  # response name, as in `y=a`. Strip a common `<name>=` prefix so these match
+  # by name rather than falling through to column order.
+  stripped <- sub("^[^=]*=", "", cn)
+
+  if (!anyDuplicated(stripped) && all(levels %in% stripped)) {
+    p <- p[, match(levels, stripped), drop = FALSE]
+    colnames(p) <- levels
+    return(p)
+  }
+
+  # A backend may return the columns in the right order but with syntactically
+  # transformed names. Match on syntactic names before giving up on names
+  # altogether.
+  safe_levels <- make.names(levels)
+  safe_cn <- make.names(cn)
+
+  if (!anyDuplicated(safe_levels) &&
+      !anyDuplicated(safe_cn) &&
+      all(safe_levels %in% safe_cn)) {
+
+    p <- p[, match(safe_levels, safe_cn), drop = FALSE]
+    colnames(p) <- levels
+    return(p)
+  }
+
+  # Last-resort positional fallback. Silently trusting column order would
+  # mis-assign probabilities without any error, so warn.
+  warning(
+    "Could not match predicted probability column names to outcome levels (",
+    paste(cn, collapse = ", "), " vs ", paste(levels, collapse = ", "),
+    "); falling back to column order.",
+    call. = FALSE
+  )
+
   colnames(p) <- levels
   p[, levels, drop = FALSE]
 }
@@ -404,7 +471,16 @@
   )
 }
 
-.tsco_stage_coef_terms <- function(fit, formula, data, engine, stage) {
+.tsco_stage_coef_terms <- function(
+    fit,
+    formula,
+    data,
+    engine,
+    stage,
+    kind,
+    response_levels,
+    reported_names = NULL) {
+
   cf <- stats::coef(fit)
   coef_names <- names(cf)
 
@@ -417,14 +493,33 @@
 
   tt <- stats::terms(formula)
   term_labels <- attr(tt, "term.labels")
-  mm <- stats::model.matrix(stats::delete.response(tt), data = data)
+
+  mm <- stats::model.matrix(
+    stats::delete.response(tt),
+    data = data
+  )
+
   assign <- attr(mm, "assign")
   design_idx <- which(assign > 0L)
   design_names <- colnames(mm)[design_idx]
   design_terms <- term_labels[assign[design_idx]]
 
+  if (is.null(reported_names)) {
+    reported_names <- .tsco_stage_reported_names(
+      fit,
+      kind = kind,
+      engine = engine,
+      response_levels = response_levels,
+      formula = formula,
+      data = data
+    )
+  }
+
   out <- rep(NA_character_, length(cf))
-  names(out) <- paste0(stage, ":", coef_names)
+  names(out) <- paste0(
+    stage, ":",
+    .tsco_apply_reported_names(coef_names, reported_names)
+  )
 
   if (identical(engine, "orm")) {
     slope_idx <- if (fit$non.slopes < length(cf)) {
@@ -444,6 +539,8 @@
     return(out)
   }
 
+  # Use raw VGAM names for design-matrix matching. Reported category labels
+  # are only for the names of the returned mapping.
   base_names <- .tsco_base_coef_name(coef_names)
   slope_idx <- which(!.tsco_is_intercept_name(base_names))
   matched <- match(base_names[slope_idx], design_names)
@@ -451,7 +548,10 @@
   if (anyNA(matched)) {
     stop(
       "Cannot align vglm coefficients with formula terms: ",
-      paste(unique(base_names[slope_idx][is.na(matched)]), collapse = ", "),
+      paste(
+        unique(base_names[slope_idx][is.na(matched)]),
+        collapse = ", "
+      ),
       ".",
       call. = FALSE
     )
@@ -494,18 +594,42 @@
 
   coef_terms <- c(
     .tsco_stage_coef_terms(
-      object$fit_stage1,
-      object$stage1_formula,
-      object$data_stage1,
-      object$stage1_engine,
-      "stage1"
+      fit = object$fit_stage1,
+      formula = object$stage1_formula,
+      data = object$data_stage1,
+      engine = object$stage1_engine,
+      stage = "stage1",
+      kind = object$stage1,
+      response_levels = object$lower_levels,
+      reported_names = .tsco_stage_reported_names(
+        object$fit_stage1,
+        kind = object$stage1,
+        engine = object$stage1_engine,
+        response_levels = object$lower_levels,
+        formula = object$stage1_formula,
+        data = object$data_stage1,
+        collapsed_label = object$lower_collapsed_label,
+        cutoff_level = object$cutoff_level
+      )
     ),
     .tsco_stage_coef_terms(
-      object$fit_stage2,
-      object$stage2_formula,
-      object$data_stage2,
-      object$stage2_engine,
-      "stage2"
+      fit = object$fit_stage2,
+      formula = object$stage2_formula,
+      data = object$data_stage2,
+      engine = object$stage2_engine,
+      stage = "stage2",
+      kind = object$stage2,
+      response_levels = object$collapsed_levels,
+      reported_names = .tsco_stage_reported_names(
+        object$fit_stage2,
+        kind = object$stage2,
+        engine = object$stage2_engine,
+        response_levels = object$collapsed_levels,
+        formula = object$stage2_formula,
+        data = object$data_stage2,
+        collapsed_label = object$lower_collapsed_label,
+        cutoff_level = object$cutoff_level
+      )
     )
   )
 
@@ -555,7 +679,154 @@
   out
 }
 
-.tsco_stage_engine <- function(kind, grouped, po_engine) {
+#' Does the installed version of `rms::orm()` accept case weights?
+#'
+#' `rms::orm()` gained a `weights` argument only in later releases. Feature
+#' detection keeps `tsco()` working across `rms` versions instead of failing
+#' inside the fitter with an "unused argument" error.
+.tsco_orm_supports_weights <- function() {
+  if (!requireNamespace("rms", quietly = TRUE)) {
+    return(FALSE)
+  }
+
+  fmls <- tryCatch(names(formals(rms::orm)), error = function(e) character())
+
+  "weights" %in% fmls
+}
+
+#' Convergence and separation diagnostics for one fitted stage.
+#'
+#' Complete or quasi-complete separation drives maximum-likelihood estimates
+#' and their standard errors toward infinity. The fitters usually still
+#' return an object, so the resulting Wald statistics look ordinary while
+#' being meaningless. This helper flags the two symptoms that matter in
+#' practice -- a fit the backend reports as failed, and coefficients whose
+#' magnitude and standard error are both implausibly large -- so that
+#' `summary.tsco()` can say so rather than printing the numbers unannotated.
+#'
+#' @param fit A fitted stage model.
+#' @param engine The stage fitting backend, either "orm" or "vglm".
+#' @param coef_table A stage coefficient table from `.tsco_coef_table()`.
+#' @param max_abs_coef,max_se Thresholds above which a coefficient is treated
+#'   as separated.
+#' @return A list with `converged`, `separated`, and `messages`.
+.tsco_stage_diagnostics <- function(
+    fit,
+    engine,
+    coef_table = NULL,
+    max_abs_coef = 10,
+    max_se = 50) {
+
+  messages <- character()
+  converged <- TRUE
+
+  if (identical(engine, "orm")) {
+    if (isTRUE(fit$fail)) {
+      converged <- FALSE
+      messages <- c(messages, "the rms::orm() fit did not converge")
+    }
+  } else if (identical(engine, "vglm")) {
+    iter <- tryCatch(methods::slot(fit, "iter"), error = function(e) NULL)
+    maxit <- tryCatch(fit@control$maxit, error = function(e) NULL)
+
+    if (is.numeric(iter) && is.numeric(maxit) &&
+        length(iter) == 1L && length(maxit) == 1L &&
+        iter >= maxit) {
+      converged <- FALSE
+      messages <- c(
+        messages,
+        paste0("the VGAM::vglm() fit reached its iteration limit (", maxit, ")")
+      )
+    }
+  }
+
+  separated <- FALSE
+
+  if (!is.null(coef_table) &&
+      is.matrix(coef_table) &&
+      all(c("Estimate", "Std. Error") %in% colnames(coef_table))) {
+
+    b <- coef_table[, "Estimate"]
+    se <- coef_table[, "Std. Error"]
+
+    flagged <- which(
+      (!is.finite(b)) |
+        (is.finite(b) & is.finite(se) & abs(b) > max_abs_coef & se > max_se)
+    )
+
+    if (length(flagged) > 0L) {
+      separated <- TRUE
+      messages <- c(
+        messages,
+        paste0(
+          "coefficient(s) ",
+          paste(rownames(coef_table)[flagged], collapse = ", "),
+          " have extreme estimates and standard errors, which usually ",
+          "indicates complete or quasi-complete separation"
+        )
+      )
+    }
+  }
+
+  list(
+    converged = converged,
+    separated = separated,
+    messages = messages
+  )
+}
+
+#' Rebuild a formula right-hand side from model-frame column names.
+#'
+#' `tsco()` fits its two stages against data frames whose columns are the
+#' *evaluated* model-frame columns, so a column produced by `log(x)` is named
+#' `log(x)` and the variable `x` no longer exists. Reusing the original
+#' right-hand side would therefore fail to resolve. Rebuilding each term from
+#' the backticked model-frame names lets inline transformations such as
+#' `log(x)`, `poly(x, 2)` and `rms::rcs(x)` work, while leaving formulas made
+#' only of plain variables completely unchanged.
+#'
+#' @param tt A terms object for the user's original formula.
+#' @return A character vector of term labels for the stage formulas.
+.tsco_stage_rhs_labels <- function(tt) {
+  term_labels <- attr(tt, "term.labels")
+  fac <- attr(tt, "factors")
+
+  labels <- character()
+
+  if (length(term_labels) > 0L) {
+    if (is.null(fac) || length(fac) == 0L || is.null(rownames(fac))) {
+      labels <- paste0("`", term_labels, "`")
+    } else {
+      labels <- vapply(
+        term_labels,
+        function(lab) {
+          vars <- rownames(fac)[fac[, lab] > 0L]
+          paste0("`", vars, "`", collapse = ":")
+        },
+        character(1L),
+        USE.NAMES = FALSE
+      )
+    }
+  }
+
+  # Offsets are model-frame columns too, and dropping them silently would
+  # change the fitted model, so carry them through explicitly.
+  offset_idx <- attr(tt, "offset")
+
+  if (length(offset_idx) > 0L) {
+    var_names <- vapply(
+      as.list(attr(tt, "variables"))[-1L],
+      .tsco_deparse,
+      character(1L)
+    )
+
+    labels <- c(labels, paste0("offset(`", var_names[offset_idx], "`)"))
+  }
+
+  labels
+}
+
+.tsco_stage_engine <- function(kind, grouped, po_engine, weighted = FALSE) {
   if (!identical(kind, "po")) {
     return("vglm")
   }
@@ -572,7 +843,26 @@
     return("vglm")
   }
 
-  if (identical(po_engine, "vglm")) "vglm" else "orm"
+  if (identical(po_engine, "vglm")) {
+    return("vglm")
+  }
+
+  # `weights` requires a backend that accepts them.
+  if (isTRUE(weighted) && !.tsco_orm_supports_weights()) {
+    if (identical(po_engine, "orm")) {
+      stop(
+        "`po_engine = \"orm\"` cannot be used with `weights` because the ",
+        "installed version of rms (", utils::packageVersion("rms"), ") does ",
+        "not accept case weights in `orm()`; use `po_engine = \"vglm\"` or ",
+        "upgrade rms.",
+        call. = FALSE
+      )
+    }
+
+    return("vglm")
+  }
+
+  "orm"
 }
 
 .tsco_validate_stage_args <- function(args, arg_name) {
@@ -643,7 +933,12 @@
       args$weights <- weights
     }
 
-    return(do.call(rms::orm, c(args, stage_args)))
+    return(
+      .tsco_trim_fit_call(
+        do.call(rms::orm, c(args, stage_args)),
+        fun = quote(rms::orm)
+      )
+    )
   }
 
   if (!identical(engine, "vglm")) {
@@ -654,17 +949,15 @@
     stop("Package 'VGAM' is required for this stage.", call. = FALSE)
   }
 
-  family <- if (identical(kind, "po")) {
-    VGAM::cumulative(
-      link = "logitlink",
-      parallel = TRUE,
-      reverse = FALSE
-    )
+  family_call <- if (identical(kind, "po")) {
+    quote(VGAM::cumulative(link = "logitlink", parallel = TRUE, reverse = FALSE))
   } else if (identical(kind, "multinomial")) {
-    VGAM::multinomial(refLevel = 1)
+    quote(VGAM::multinomial(refLevel = 1))
   } else {
     stop("Unknown stage model kind: ", kind, call. = FALSE)
   }
+
+  family <- eval(family_call)
 
   args <- list(
     formula = formula,
@@ -676,7 +969,61 @@
     args$weights <- weights
   }
 
-  do.call(VGAM::vglm, c(args, stage_args))
+  .tsco_trim_fit_call(
+    do.call(VGAM::vglm, c(args, stage_args)),
+    fun = quote(VGAM::vglm),
+    family = family_call
+  )
+}
+
+#' Replace bulky literals in a fitted stage's recorded call.
+#'
+#' `do.call()` splices the stage data frame, the case weights and the family
+#' object into the call each fitter records, which inflates every fitted
+#' `tsco` object by roughly the size of the analysis data. Nothing in the
+#' package re-evaluates those recorded calls -- likelihood-ratio refits build
+#' fresh calls and prediction goes through `newdata` -- so the literals are
+#' replaced with placeholder symbols after fitting.
+#'
+#' @param fit A fitted stage model.
+#' @param fun A call or name to record as the fitted call's function.
+#' @param family A replacement expression for the recorded `family` argument.
+.tsco_trim_fit_call <- function(fit, fun = NULL, family = NULL) {
+  trim <- function(cl) {
+    if (!is.call(cl)) {
+      return(cl)
+    }
+
+    # `do.call()` also splices in the fitter function itself, so the recorded
+    # call carries a copy of its whole body.
+    if (!is.null(fun)) {
+      cl[[1L]] <- fun
+    }
+
+    for (nm in intersect(c("data", "weights"), names(cl))) {
+      cl[[nm]] <- as.name(paste0(".tsco_", nm))
+    }
+
+    if (!is.null(family) && "family" %in% names(cl)) {
+      cl[["family"]] <- family
+    }
+
+    cl
+  }
+
+  if (isS4(fit)) {
+    if (methods::.hasSlot(fit, "call")) {
+      methods::slot(fit, "call") <- trim(methods::slot(fit, "call"))
+    }
+
+    return(fit)
+  }
+
+  if (!is.null(fit$call)) {
+    fit$call <- trim(fit$call)
+  }
+
+  fit
 }
 
 .tsco_predict_stage_prob <- function(
@@ -735,6 +1082,25 @@
     stop("Term not found in formula: ", term, call. = FALSE)
   }
 
+  # `stats::drop.terms()` cannot build an intercept-only formula on every
+  # supported R version, so construct the reduced formula directly. This keeps
+  # joint tests available for single-predictor models such as `y ~ treatment`.
+  if (length(term_labels) == 1L) {
+    if (attr(tt, "intercept") == 0L) {
+      stop(
+        "Cannot drop the only term from a formula without an intercept.",
+        call. = FALSE
+      )
+    }
+
+    f_reduced <- stats::as.formula(
+      paste0(.tsco_deparse(formula[[2L]]), " ~ 1"),
+      env = environment(formula)
+    )
+
+    return(f_reduced)
+  }
+
   tt_reduced <- stats::drop.terms(
     tt,
     dropx = pos,
@@ -772,6 +1138,35 @@
   }
 
   list(value = lrt, problem = NA_character_)
+}
+
+#' Log-likelihood and degrees of freedom of an intercept-only stage.
+#'
+#' A PO or multinomial model with no covariates is saturated in the category
+#' probabilities, so its maximum-likelihood fit is the observed (weighted)
+#' category distribution and its log-likelihood has a closed form. Using that
+#' form avoids refitting an intercept-only model, which not every backend
+#' supports: `rms::orm(y ~ 1)` fails outright on some versions of rms. The
+#' constant conventions match `.tsco_count_loglik()` and both backends, which
+#' all omit multinomial combinatorial constants, so this value is directly
+#' comparable with the full model's.
+#'
+#' @param totals Weighted category totals for the stage response.
+#' @return A list with `loglik` and `df`.
+.tsco_null_stage_fit_stats <- function(totals) {
+  totals <- as.numeric(totals)
+
+  if (length(totals) < 2L || any(!is.finite(totals)) || sum(totals) <= 0) {
+    return(list(loglik = NA_real_, df = NA_real_))
+  }
+
+  p <- totals / sum(totals)
+  positive <- totals > 0
+
+  list(
+    loglik = sum(totals[positive] * log(p[positive])),
+    df = length(totals) - 1L
+  )
 }
 
 .tsco_joint_lrt_tests <- function(object) {
@@ -817,8 +1212,29 @@
   stage1_args <- object$stage1_args
   stage2_args <- object$stage2_args
 
+  # Dropping the only term leaves an intercept-only model in both stages,
+  # whose fit is available in closed form.
+  null_reduced <- length(term_labels) == 1L
+
   res <- lapply(term_labels, function(term) {
     tryCatch({
+      if (null_reduced) {
+        null1 <- .tsco_null_stage_fit_stats(object$totals_stage1)
+        null2 <- .tsco_null_stage_fit_stats(object$totals_stage2)
+
+        ll1_reduced <- null1$loglik
+        ll2_reduced <- null2$loglik
+        df1_reduced <- null1$df
+        df2_reduced <- null2$df
+
+        if (!is.finite(ll1_reduced) || !is.finite(ll2_reduced)) {
+          stop(
+            "Could not compute intercept-only reduced-model log-likelihoods.",
+            call. = FALSE
+          )
+        }
+      } else {
+
       f1_reduced <- .tsco_drop_term_formula(object$stage1_formula, term)
       f2_reduced <- .tsco_drop_term_formula(object$stage2_formula, term)
 
@@ -849,6 +1265,8 @@
 
       df1_reduced <- .tsco_df(fit1_reduced)
       df2_reduced <- .tsco_df(fit2_reduced)
+
+      }
 
       lrt <- 2 * (
         (ll1_full + ll2_full) -
@@ -937,6 +1355,33 @@
   }
 
   nd <- as.data.frame(newdata)
+
+  # If `newdata` supplies the raw variables rather than the evaluated
+  # model-frame columns, evaluate the original right-hand side against it so
+  # that inline transformations such as `log(x)` resolve the same way they did
+  # at fitting time. When `newdata` already holds the model-frame columns
+  # (including `object$predict_data` itself) it is used as supplied.
+  mf_cols <- names(object$predict_data)
+
+  if (!is.null(object$terms_rhs) &&
+      length(mf_cols) > 0L &&
+      !all(mf_cols %in% names(nd))) {
+
+    nd <- tryCatch(
+      stats::model.frame(
+        object$terms_rhs,
+        data = nd,
+        na.action = stats::na.pass
+      ),
+      error = function(e) {
+        stop(
+          "Could not evaluate the model formula on `newdata`: ",
+          conditionMessage(e),
+          call. = FALSE
+        )
+      }
+    )
+  }
 
   predictor_levels <- object$predictor_levels
   predictor_ordered <- object$predictor_ordered
@@ -1074,4 +1519,229 @@
   names(out) <- object$lower_levels
 
   out
+}
+
+
+#' Design-matrix column names for a stage, excluding the intercept.
+#'
+#' Used to give proportional-odds slopes the same reported names regardless of
+#' whether the stage was fitted with `rms::orm()` or `VGAM::vglm()`.
+#'
+#' @param formula The stage formula.
+#' @param data The stage fitting data.
+.tsco_stage_design_names <- function(formula, data) {
+  if (is.null(formula) || is.null(data)) {
+    return(NULL)
+  }
+
+  tryCatch({
+    tt <- stats::delete.response(stats::terms(formula))
+    mm <- stats::model.matrix(tt, data = data)
+    assign <- attr(mm, "assign")
+    colnames(mm)[assign > 0L]
+  }, error = function(e) NULL)
+}
+
+#' Reported coefficient names for a proportional-odds stage.
+#'
+#' `coef.tsco()` reports PO thresholds on the lower-tail scale
+#' `Pr(Y <= level_j | X) = expit(gamma_j + x'beta)`, so the thresholds are
+#' labelled by the level they bound rather than by the backend's own
+#' convention. `rms::orm()` names its thresholds for the *upper* tail
+#' (`y>=2`), which contradicts the reported value once the sign correction in
+#' `.tsco_sign_vector()` has been applied. Slopes take the design-matrix
+#' column names, which `VGAM::vglm()` already uses, so that both engines
+#' produce identical names for the same model.
+#'
+#' @param coef_names The backend's coefficient names.
+#' @param response_levels The levels of the stage's response variable.
+#' @param n_thresholds The number of threshold (intercept) coefficients, which
+#'   come first in both backends' coefficient vectors.
+#' @param design_names Design-matrix column names for the slopes, excluding
+#'   the intercept. Optional; raw names are kept when absent.
+#' @param collapsed_label,cutoff_level The stage-2 collapsed level's internal
+#'   label and the cutoff level it stands for, so that its threshold can be
+#'   reported as `Y<C`. Optional.
+.tsco_po_reported_coef_names <- function(
+    coef_names,
+    response_levels,
+    n_thresholds,
+    design_names = NULL,
+    collapsed_label = NULL,
+    cutoff_level = NULL) {
+
+  out <- coef_names
+
+  # In stage 2 the first level is the collapsed lower partition, so the
+  # threshold that bounds it is exactly `Y < C`; naming it `Y<=<internal
+  # label>` would be both ugly and confusing.
+  threshold_labels <- paste0("Y<=", response_levels)
+
+  if (!is.null(collapsed_label) && !is.null(cutoff_level)) {
+    is_collapsed <- response_levels == collapsed_label
+    threshold_labels[is_collapsed] <- paste0("Y<", cutoff_level)
+  }
+
+  if (!is.finite(n_thresholds) || n_thresholds < 1L) {
+    return(out)
+  }
+
+  n_thresholds <- as.integer(n_thresholds)
+
+  if (n_thresholds > length(coef_names) ||
+      n_thresholds >= length(response_levels)) {
+    return(out)
+  }
+
+  out[seq_len(n_thresholds)] <- threshold_labels[seq_len(n_thresholds)]
+
+  slope_idx <- seq.int(n_thresholds + 1L, length(coef_names))
+
+  if (!is.null(design_names) && length(design_names) == length(slope_idx)) {
+    out[slope_idx] <- design_names
+  }
+
+  out
+}
+
+#' Reported coefficient names for one fitted TSCO stage.
+#'
+#' Returns a character vector of reported names, named by the backend's own
+#' coefficient names so that callers can look up names for an arbitrary
+#' subset or ordering of coefficients.
+#'
+#' @param fit A fitted stage model.
+#' @param kind "po" or "multinomial".
+#' @param engine The stage fitting backend, either "orm" or "vglm".
+#' @param response_levels The levels of the stage's response variable.
+#' @param formula,data The stage formula and fitting data, used to recover
+#'   design-matrix column names for PO slopes. Optional.
+#' @param collapsed_label,cutoff_level The stage-2 collapsed level's internal
+#'   label and the cutoff level it stands for. Optional.
+.tsco_stage_reported_names <- function(
+    fit,
+    kind,
+    engine = NULL,
+    response_levels = NULL,
+    formula = NULL,
+    data = NULL,
+    collapsed_label = NULL,
+    cutoff_level = NULL) {
+
+  coef_names <- names(stats::coef(fit))
+
+  if (is.null(coef_names)) {
+    return(NULL)
+  }
+
+  if (is.null(engine)) {
+    engine <- if (inherits(fit, "orm")) "orm" else "vglm"
+  }
+
+  if (is.null(response_levels)) {
+    out <- coef_names
+    names(out) <- coef_names
+    return(out)
+  }
+
+  if (identical(kind, "multinomial")) {
+    out <- .tsco_reported_coef_names(
+      coef_names,
+      kind = kind,
+      response_levels = response_levels
+    )
+
+    names(out) <- coef_names
+    return(out)
+  }
+
+  n_thresholds <- if (identical(engine, "orm")) {
+    fit$non.slopes
+  } else {
+    sum(grepl("(Intercept)", coef_names, fixed = TRUE))
+  }
+
+  out <- .tsco_po_reported_coef_names(
+    coef_names,
+    response_levels = response_levels,
+    n_thresholds = n_thresholds,
+    design_names = .tsco_stage_design_names(formula, data),
+    collapsed_label = collapsed_label,
+    cutoff_level = cutoff_level
+  )
+
+  names(out) <- coef_names
+  out
+}
+
+.tsco_reported_coef_names <- function(
+    coef_names,
+    kind,
+    response_levels) {
+
+  if (!identical(kind, "multinomial")) {
+    return(coef_names)
+  }
+
+  if (length(response_levels) < 2L) {
+    stop(
+      "Internal error: multinomial response must have at least two levels.",
+      call. = FALSE
+    )
+  }
+
+  # refLevel = 1, so linear predictors correspond to response_levels[-1].
+  target_levels <- response_levels[-1L]
+
+  has_suffix <- grepl(":[0-9]+$", coef_names)
+
+  # VGAM may omit the :1 suffix for binary multinomial models.
+  if (!any(has_suffix)) {
+    if (length(target_levels) == 1L) {
+      return(paste0(coef_names, ":", target_levels))
+    }
+
+    stop(
+      "Internal error: multinomial coefficient names lack linear-predictor ",
+      "suffixes for a response with multiple nonreference categories.",
+      call. = FALSE
+    )
+  }
+
+  index <- rep(NA_integer_, length(coef_names))
+
+  index[has_suffix] <- as.integer(
+    sub("^.*:([0-9]+)$", "\\1", coef_names[has_suffix])
+  )
+
+  bad <- has_suffix & (
+    is.na(index) |
+      index < 1L |
+      index > length(target_levels)
+  )
+
+  if (any(bad)) {
+    stop(
+      "Internal error: multinomial coefficient suffixes could not be ",
+      "matched to response levels.",
+      call. = FALSE
+    )
+  }
+
+  # In multicategory VGAM fits, all coefficient names should ordinarily carry
+  # a predictor suffix. Treat mixed suffixed/unsuffixed names as an internal
+  # inconsistency rather than silently returning ambiguous names.
+  if (any(!has_suffix)) {
+    stop(
+      "Internal error: multinomial coefficient names contain a mixture of ",
+      "suffixed and unsuffixed values.",
+      call. = FALSE
+    )
+  }
+
+  paste0(
+    sub(":[0-9]+$", "", coef_names),
+    ":",
+    target_levels[index]
+  )
 }

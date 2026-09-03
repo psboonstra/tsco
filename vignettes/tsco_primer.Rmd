@@ -179,7 +179,7 @@ fit_comparison <- transform(
 fit_comparison
 ```
 
-For these data, BIC selects `{r fit_comparison$model[1]}`. The smallest TsCO
+For these data, BIC selects `r fit_comparison$model[1]`. The smallest TsCO
 alternative is PO|C=4|PO, which gains some likelihood but adds two parameters.
 Thus, these data do not provide enough support for the added two-stage
 complexity under BIC.
@@ -242,3 +242,12 @@ unstable, but it does not make a finite maximum-likelihood estimate exist. Under
 separation, Wald inference and the usual chi-squared calibration of a
 likelihood-ratio statistic may both be unreliable; convergence diagnostics and
 coefficient estimates should be examined before interpreting either test.
+
+`summary()` prints a "Fit diagnostics" block when a stage fails to converge or
+when a coefficient shows the extreme-estimate-and-extreme-standard-error
+signature of separation. These data trigger it for the multinomial stages,
+because rating 5 never occurs under cold temperature. That is also why the
+MR|C|MR and ordinary MR log likelihoods above differ slightly: the likelihood
+is nearly flat as the affected coefficients diverge, so the two
+parameterizations stop at different points on the same plateau rather than
+describing different models.

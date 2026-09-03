@@ -29,3 +29,12 @@ to manuscript cutpoints defined by
 Raw stage-fit coefficients are sign-corrected as needed; see
 \code{.tsco_sign_vector()} for the derivation.
 }
+\details{
+Reported names do not depend on the fitting engine. Proportional-odds
+thresholds are named \verb{Y<=<level>} for the level they bound, matching the
+lower-tail scale on which their values are reported, and slopes take the
+design-matrix column names that \code{VGAM::vglm()} uses. In particular the
+upper-tail threshold labels that \code{rms::orm()} produces (\code{y>=2}) are not
+used, because they contradict the reported value once the sign correction
+has been applied.
+}

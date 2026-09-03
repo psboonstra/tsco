@@ -84,31 +84,26 @@ test_that("individual-level PO stages use rms::orm", {
 
   orm_stage1 <- coef(fit_popo, stage = "stage1")
   vglm_stage1 <- coef(fit_vglm_popo, stage = "stage1")
-  orm_stage1_thresholds <- orm_stage1[
-    seq_len(fit_popo$fit_stage1$non.slopes)
-  ]
-  vglm_stage1_thresholds <- vglm_stage1[
-    grepl("(Intercept)", names(vglm_stage1), fixed = TRUE)
-  ]
-  expect_equal(
-    unname(orm_stage1_thresholds),
-    unname(vglm_stage1_thresholds),
-    tolerance = 1e-5
-  )
+
+  # Reported names are engine-independent, so the two backends can be
+  # compared name by name rather than by position.
+  expect_identical(names(orm_stage1), names(vglm_stage1))
+  expect_equal(orm_stage1, vglm_stage1, tolerance = 1e-5)
 
   orm_stage2 <- coef(fit_popo, stage = "stage2")
   vglm_stage2 <- coef(fit_vglm_popo, stage = "stage2")
-  orm_stage2_thresholds <- orm_stage2[
-    seq_len(fit_popo$fit_stage2$non.slopes)
-  ]
-  vglm_stage2_thresholds <- vglm_stage2[
-    grepl("(Intercept)", names(vglm_stage2), fixed = TRUE)
-  ]
-  expect_equal(
-    unname(orm_stage2_thresholds),
-    unname(vglm_stage2_thresholds),
-    tolerance = 1e-5
+
+  expect_identical(names(orm_stage2), names(vglm_stage2))
+  expect_equal(orm_stage2, vglm_stage2, tolerance = 1e-5)
+
+  # PO thresholds are labelled by the level they bound on the reported
+  # lower-tail scale, never by orm's upper-tail `y>=` convention.
+  expect_identical(
+    names(orm_stage1)[seq_len(fit_popo$fit_stage1$non.slopes)],
+    paste0("Y<=", fit_popo$lower_levels[seq_len(fit_popo$fit_stage1$non.slopes)])
   )
+  expect_false(any(grepl(">=", names(orm_stage1), fixed = TRUE)))
+  expect_identical(names(orm_stage2)[1L], paste0("Y<", fit_popo$cutoff_level))
 
   expect_equal(predict(fit_vglm_popo), predict(fit_popo), tolerance = 1e-6)
   expect_true(all(is.finite(summary(fit_vglm_popo, joint_test = "LRT")$joint_tests$Chisq)))

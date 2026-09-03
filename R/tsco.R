@@ -15,10 +15,11 @@
 #' cbind(normal, mild, severe) ~ x.
 #'
 #' @param formula Model formula, e.g. y ~ x1 + x2 for individual-level data or
-#'   cbind(y0, y1, y2) ~ x1 + x2 for grouped count data.
-#'   Note: transformed predictors should currently be precomputed before
-#'   calling `tsco()`, as inline transformations in the formula may not be
-#'   available in the internally constructed stage-specific data frames.
+#'   cbind(y0, y1, y2) ~ x1 + x2 for grouped count data. Inline
+#'   transformations such as `log(x)` or `poly(x, 2)` are supported: the
+#'   stage-specific right-hand sides are rebuilt from the model-frame columns,
+#'   and `newdata` supplied to [predict.tsco()] may contain either the raw
+#'   variables or the transformed columns.
 #' @param data A data.frame.
 #' @param cutoff_level The first outcome level in the upper partition, supplied
 #'   as a level label.
@@ -62,8 +63,9 @@
 #' Complete or quasi-complete separation in either fitted stage can yield
 #' infinite or unstable maximum-likelihood estimates. Likelihood-ratio tests do
 #' not remove this problem, and their ordinary chi-squared reference
-#' distribution may be unreliable under separation. The package does not
-#' automatically detect or correct separation.
+#' distribution may be unreliable under separation. [summary.tsco()] reports a
+#' diagnostic when a stage shows the usual symptoms, but the package does not
+#' correct separation.
 #'
 #' @return An object of class "tsco".
 #' @export
@@ -371,10 +373,28 @@ tsco <- function(
     w_all <- NULL
   }
 
-  # Internal helper: construct formula with new response and original RHS.
+  # Internal helper: construct a stage formula with a new response.
+  #
+  # The right-hand side is rebuilt from the model-frame column names rather
+  # than reused verbatim, because the stage data frames below hold evaluated
+  # model-frame columns. For a formula of plain variables this reproduces the
+  # original right-hand side exactly; for one containing inline
+  # transformations it resolves them against the columns that exist.
+  rhs_labels <- .tsco_stage_rhs_labels(tt)
+
   make_stage_formula <- function(response_name) {
+    rhs <- if (length(rhs_labels) == 0L) {
+      "1"
+    } else {
+      paste(rhs_labels, collapse = " + ")
+    }
+
+    if (identical(as.integer(attr(tt, "intercept")), 0L)) {
+      rhs <- paste(rhs, "- 1")
+    }
+
     stats::as.formula(
-      call("~", as.name(response_name), formula[[3L]]),
+      paste0("`", response_name, "` ~ ", rhs),
       env = environment(formula)
     )
   }
@@ -523,12 +543,14 @@ tsco <- function(
   stage1_engine <- .tsco_stage_engine(
     stage1,
     grouped = is_grouped,
-    po_engine = po_engine
+    po_engine = po_engine,
+    weighted = !is.null(w1)
   )
   stage2_engine <- .tsco_stage_engine(
     stage2,
     grouped = is_grouped,
-    po_engine = po_engine
+    po_engine = po_engine,
+    weighted = !is.null(w2)
   )
 
   fit1 <- .tsco_fit_stage(
@@ -603,11 +625,17 @@ tsco <- function(
     fit_stage2 = fit2,
 
     # For prediction and LRT refits
+    terms_rhs = stats::delete.response(tt),
     predict_data = predict_data,
     data_stage1 = d1,
     data_stage2 = d2,
     weights_stage1 = w1,
     weights_stage2 = w2,
+
+    # Weighted category totals, used for closed-form intercept-only fits in
+    # joint likelihood-ratio tests.
+    totals_stage1 = colSums(y1_counts_ll),
+    totals_stage2 = colSums(y2_counts_ll),
     stage1_args = stage1_args,
     stage2_args = stage2_args,
 

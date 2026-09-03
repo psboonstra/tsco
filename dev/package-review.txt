@@ -96,6 +96,18 @@ coef.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   b1 <- b1_raw * s1
   b2 <- b2_raw * s2
 
+  names(b1) <- .tsco_reported_coef_names(
+    names(b1_raw),
+    kind = object$stage1,
+    response_levels = object$lower_levels
+  )
+
+  names(b2) <- .tsco_reported_coef_names(
+    names(b2_raw),
+    kind = object$stage2,
+    response_levels = object$collapsed_levels
+  )
+
   if (stage == "stage1") {
     return(b1)
   }
@@ -595,13 +607,15 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
   coef_stage1 <- .tsco_coef_table(
     object$fit_stage1,
     kind = object$stage1,
-    engine = object$stage1_engine
+    engine = object$stage1_engine,
+    response_levels = object$lower_levels
   )
 
   coef_stage2 <- .tsco_coef_table(
     object$fit_stage2,
     kind = object$stage2,
-    engine = object$stage2_engine
+    engine = object$stage2_engine,
+    response_levels = object$collapsed_levels
   )
 
   joint_test <- match.arg(joint_test)
@@ -809,6 +823,15 @@ print.summary.tsco <- function(
     cat("\nNo joint tests performed.\n")
   }
 
+  if (identical(x$stage1, "multinomial")) {
+    cat(
+      "Reference category: Y = ",
+      x$lower_levels[1],
+      "\n",
+      sep = ""
+    )
+  }
+
   cat("\nStage 1 coefficients: ")
   cat("Y | Y < ", x$cutoff_level, "\n", sep = "")
 
@@ -821,6 +844,15 @@ print.summary.tsco <- function(
       signif.stars = signif.stars,
       na.print = "NA",
       ...
+    )
+  }
+
+  if (identical(x$stage2, "multinomial")) {
+    cat(
+      "Reference category: Y < ",
+      x$cutoff_level,
+      "\n",
+      sep = ""
     )
   }
 
@@ -1659,7 +1691,8 @@ R/utils-tsco.R
 .tsco_stage_coef_table <- function(
     fit,
     kind,
-    engine = NULL) {
+    engine = NULL,
+    response_levels  = NULL) {
   b_raw <- tryCatch(stats::coef(fit), error = function(e) NULL)
   V_raw <- .tsco_stage_vcov(fit)
 
@@ -1707,6 +1740,14 @@ R/utils-tsco.R
     `Pr(>|z|)` = p
   )
 
+  if (!is.null(response_levels)) {
+    rownames(out) <- .tsco_reported_coef_names(
+      rownames(out),
+      kind = kind,
+      response_levels = response_levels
+    )
+  }
+
   rownames(out) <- names(b)
   out
 }
@@ -1720,11 +1761,17 @@ R/utils-tsco.R
 #' @param fit A fitted stage model (a "vglm" object).
 #' @param kind "po" or "multinomial", i.e. object$stage1 or object$stage2.
 #' @param engine The stage fitting backend, either "orm" or "vglm".
-.tsco_coef_table <- function(fit, kind, engine = NULL) {
+.tsco_coef_table <- function(
+    fit,
+    kind,
+    engine = NULL,
+    response_levels = NULL) {
+
   .tsco_stage_coef_table(
     fit = fit,
     kind = kind,
-    engine = engine
+    engine = engine,
+    response_levels = response_levels
   )
 }
 
@@ -1982,8 +2029,17 @@ R/utils-tsco.R
   design_names <- colnames(mm)[design_idx]
   design_terms <- term_labels[assign[design_idx]]
 
+  reported_names <- .tsco_reported_coef_names(
+    coef_names,
+    kind = if (identical(engine, "orm")) "po" else {
+      if (length(coef_names) > 0L &&
+          any(grepl(":[0-9]+$", coef_names))) "multinomial" else "po"
+    },
+    response_levels = response_levels
+  )
+
   out <- rep(NA_character_, length(cf))
-  names(out) <- paste0(stage, ":", coef_names)
+  names(out) <- paste0(stage, ":", reported_names)
 
   if (identical(engine, "orm")) {
     slope_idx <- if (fit$non.slopes < length(cf)) {
@@ -2636,6 +2692,63 @@ R/utils-tsco.R
 }
 
 
+.tsco_reported_coef_names <- function(
+    coef_names,
+    kind,
+    response_levels) {
+
+  if (!identical(kind, "multinomial")) {
+    return(coef_names)
+  }
+
+  if (length(response_levels) < 2L) {
+    stop(
+      "Internal error: multinomial response must have at least two levels.",
+      call. = FALSE
+    )
+  }
+
+  # refLevel = 1, so VGAM's linear predictors correspond in order to
+  # response_levels[-1].
+  target_levels <- response_levels[-1L]
+
+  has_suffix <- grepl(":[0-9]+$", coef_names)
+
+  if (!any(has_suffix)) {
+    return(coef_names)
+  }
+
+  index <- rep(NA_integer_, length(coef_names))
+  index[has_suffix] <- as.integer(
+    sub("^.*:([0-9]+)$", "\\1", coef_names[has_suffix])
+  )
+
+  bad <- has_suffix & (
+    is.na(index) |
+      index < 1L |
+      index > length(target_levels)
+  )
+
+  if (any(bad)) {
+    stop(
+      "Internal error: multinomial coefficient suffixes could not be ",
+      "matched to response levels.",
+      call. = FALSE
+    )
+  }
+
+  out <- coef_names
+
+  out[has_suffix] <- paste0(
+    sub(":[0-9]+$", "", coef_names[has_suffix]),
+    ":",
+    target_levels[index[has_suffix]]
+  )
+
+  out
+}
+
+
 ================================================================================
 R/vcov-tsco.R
 ================================================================================
@@ -2693,6 +2806,21 @@ vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
 
   V1 <- V1_raw * outer(s1, s1)
   V2 <- V2_raw * outer(s2, s2)
+
+  rn1 <- .tsco_reported_coef_names(
+    rownames(V1),
+    kind = object$stage1,
+    response_levels = object$lower_levels
+  )
+
+  rn2 <- .tsco_reported_coef_names(
+    rownames(V2),
+    kind = object$stage2,
+    response_levels = object$collapsed_levels
+  )
+
+  dimnames(V1) <- list(rn1, rn1)
+  dimnames(V2) <- list(rn2, rn2)
 
   if (stage == "stage1") {
     return(V1)
@@ -3403,6 +3531,7 @@ test_that("negative LRT statistics are cleaned or rejected", {
 
 test_that("failed reduced LRT fits retain diagnostic information", {
   dat <- make_wine_test_data()
+
   fit <- tsco(
     dat$grouped_formula,
     data = dat$grouped,
@@ -3412,16 +3541,30 @@ test_that("failed reduced LRT fits retain diagnostic information", {
     stage2 = "po",
     warn_degenerate = FALSE
   )
-  fit$stage1_args <- list(not_an_argument = TRUE)
 
-  expect_snapshot(
-    lrt <- summary(fit, joint_test = "LRT")$joint_tests
+  # Deliberately make reduced stage-1 refits fail. This modifies only the
+  # stored refit data; the already fitted full model remains valid.
+  fit$data_stage1$.tsco_y_stage1 <- NULL
+
+  expect_warning(
+    lrt <- summary(fit, joint_test = "LRT")$joint_tests,
+    "Joint likelihood-ratio test problems"
   )
 
-  expect_equal(sum(!is.na(lrt$Chisq)), 0L)
-  expect_identical(names(attr(lrt, "errors")), c("temp", "contact"))
-  expect_equal(sum(grepl("not_an_argument", attr(lrt, "errors"))), 2L)
+  # Both formula terms should have failed because every reduced stage-1 model
+  # requires the removed response.
+  expect_true(all(is.na(lrt$Chisq)))
+  expect_true(all(is.na(lrt$df)))
+  expect_true(all(is.na(lrt[["Pr(>Chisq)"]])))
+
+  errors <- attr(lrt, "errors")
+
+  expect_false(is.null(errors))
+  expect_identical(names(errors), c("temp", "contact"))
+  expect_length(errors, 2L)
+  expect_true(all(nzchar(errors)))
 })
+
 
 
 test_that("LRT in summary matches manual reduced-model refit", {
@@ -3900,9 +4043,9 @@ test_that("predict.tsco works with newdata and matches VGAM", {
     ignore_attr = TRUE
   )
 
-  expect_snapshot(
+  expect_error(
     predict(fit, newdata = nd, backend_option = TRUE),
-    error = TRUE
+    regexp = "Additional prediction arguments are not supported"
   )
 })
 
@@ -4187,33 +4330,44 @@ test_that("tsco model produces same probabilities as standard multinomial in edg
       .groups = "drop"
     )
 
-  fit1 <- tsco(
-    cbind(y1, y2, y3, y4, y5) ~ x,
-    data = dat_grouped,
-    cutoff_level = "y5",
-    stage1 = "multinomial",
-    stage2 = "po"
+  # These grouped models are intentionally saturated over the two values of x.
+  # VGAM may warn about convergence at a half-step, but the test concerns only
+  # equivalence of fitted probabilities, not coefficient-based inference.
+
+  fit1 <- suppressWarnings(
+    tsco(
+      cbind(y1, y2, y3, y4, y5) ~ x,
+      data = dat_grouped,
+      cutoff_level = "y5",
+      stage1 = "multinomial",
+      stage2 = "po"
+    )
   )
+
 
   predict_fit1 <-
     predict(fit1, newdata = data.frame(x = c(0, 1)))
 
-  fit2 <- tsco(
-    cbind(y1, y2, y3, y4, y5) ~ x,
-    data = dat_grouped,
-    cutoff_level = "y5",
-    stage1 = "multinomial",
-    stage2 = "multinomial"
+  fit2 <- suppressWarnings(
+    tsco(
+      cbind(y1, y2, y3, y4, y5) ~ x,
+      data = dat_grouped,
+      cutoff_level = "y5",
+      stage1 = "multinomial",
+      stage2 = "multinomial"
+    )
   )
 
   predict_fit2 <-
     predict(fit2, newdata = data.frame(x = c(0, 1)))
 
 
-  fit3 <- VGAM::vglm(
-    cbind(y1, y2, y3, y4, y5) ~ x,
-    data = dat_grouped,
-    family = VGAM::multinomial(),
+  fit3 <- suppressWarnings(
+    VGAM::vglm(
+      cbind(y1, y2, y3, y4, y5) ~ x,
+      data = dat_grouped,
+      family = VGAM::multinomial()
+    )
   )
 
   predict_fit3 <-

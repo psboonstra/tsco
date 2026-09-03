@@ -28,8 +28,8 @@ library(tsco)
 library(VGAM) # for wine data
 data(wine)
 
-# Multinomial for Y | Y < bitter4
-# Proportional odds for {Y < bitter 4, bitter 4, bitter 5}
+# Proportional odds for Y | Y < bitter4
+# Multinomial for {Y < bitter4, bitter4, bitter5}
 tsco_ex <-
   tsco(
     formula = cbind(bitter1, bitter2, bitter3, bitter4, bitter5) ~ temp + contact,

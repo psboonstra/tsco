@@ -21,10 +21,11 @@ tsco(
 }
 \arguments{
 \item{formula}{Model formula, e.g. y ~ x1 + x2 for individual-level data or
-cbind(y0, y1, y2) ~ x1 + x2 for grouped count data.
-Note: transformed predictors should currently be precomputed before
-calling \code{tsco()}, as inline transformations in the formula may not be
-available in the internally constructed stage-specific data frames.}
+cbind(y0, y1, y2) ~ x1 + x2 for grouped count data. Inline
+transformations such as \code{log(x)} or \code{poly(x, 2)} are supported: the
+stage-specific right-hand sides are rebuilt from the model-frame columns,
+and \code{newdata} supplied to \code{\link[=predict.tsco]{predict.tsco()}} may contain either the raw
+variables or the transformed columns.}
 
 \item{data}{A data.frame.}
 
@@ -99,7 +100,8 @@ terms. See \code{\link[=predict.tsco]{predict.tsco()}} for details.
 Complete or quasi-complete separation in either fitted stage can yield
 infinite or unstable maximum-likelihood estimates. Likelihood-ratio tests do
 not remove this problem, and their ordinary chi-squared reference
-distribution may be unreliable under separation. The package does not
-automatically detect or correct separation.
+distribution may be unreliable under separation. \code{\link[=summary.tsco]{summary.tsco()}} reports a
+diagnostic when a stage shows the usual symptoms, but the package does not
+correct separation.
 }
 

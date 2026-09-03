@@ -28,5 +28,11 @@ separation. If a stage's maximum-likelihood estimate is attained only at
 infinity, both Wald inference and the ordinary chi-squared reference
 distribution for likelihood-ratio tests may be unreliable. Inspect
 convergence diagnostics and coefficient estimates before interpreting either
-test; \code{summary.tsco()} does not automatically detect or correct separation.
+test.
+
+The returned object carries a \code{diagnostics} element reporting, per stage,
+whether the backend converged and whether any coefficient shows the
+magnitude-and-standard-error signature of complete or quasi-complete
+separation. \code{print()} shows these only when there is something to report.
+They are a warning that the numbers need scrutiny, not a correction.
 }
