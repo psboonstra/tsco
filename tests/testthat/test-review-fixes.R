@@ -68,7 +68,22 @@ test_that("the intercept-only reduced fit matches a manual null log-likelihood",
   )
 })
 
-test_that("case weights work under the default engine", {
+# `rms::orm()` notes that weights are ignored by validate() and bootcov().
+# tsco calls neither, and the note only fires on rms versions whose orm()
+# accepts weights at all, so muffle that one message rather than all warnings.
+muffle_orm_weight_note <- function(expr) {
+  withCallingHandlers(
+    expr,
+    warning = function(w) {
+      if (grepl("weights are ignored in model validation",
+                conditionMessage(w), fixed = TRUE)) {
+        invokeRestart("muffleWarning")
+      }
+    }
+  )
+}
+
+test_that("case weights scale the log-likelihood under the default engine", {
   dat <- make_wine_test_data()
 
   args <- list(
@@ -82,13 +97,15 @@ test_that("case weights work under the default engine", {
   )
 
   fit <- do.call(tsco, args)
-  fit_w <- do.call(
-    tsco,
-    c(args, list(weights = rep(2, nrow(dat$individual))))
+
+  fit_w <- muffle_orm_weight_note(
+    do.call(tsco, c(args, list(weights = rep(2, nrow(dat$individual)))))
   )
 
   # Doubling every weight doubles the log-likelihood and leaves the estimates
-  # unchanged, whichever backend the weighted fit ends up using.
+  # unchanged, whichever backend the weighted fit ends up using. Note this
+  # says nothing about whether the weights reached the fitter -- a constant
+  # weight vector cannot move the MLE. The next test covers that.
   expect_equal(
     as.numeric(logLik(fit_w)),
     2 * as.numeric(logLik(fit)),
@@ -100,6 +117,91 @@ test_that("case weights work under the default engine", {
     unname(coef(fit)),
     tolerance = 1e-4
   )
+})
+
+test_that("non-constant case weights reach the fitter", {
+  dat <- make_wine_test_data()
+
+  # Integer case weights must reproduce a fit to the row-replicated dataset.
+  # This is the check that fails if a backend silently drops `weights`.
+  set.seed(11)
+  w <- sample(1:3, nrow(dat$individual), replace = TRUE)
+  replicated <- dat$individual[rep(seq_len(nrow(dat$individual)), times = w), ]
+
+  base_args <- list(
+    formula = rating ~ temp + contact,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
+    stage1 = "po",
+    stage2 = "po",
+    warn_degenerate = FALSE
+  )
+
+  # Pin the engine explicitly on both sides of each comparison. Under "auto" a
+  # weighted and an unweighted fit can land on *different* backends (see the
+  # backend-selection test below), so comparing them would compare solvers
+  # rather than weight handling.
+  engines <- c("vglm", if (isTRUE(.tsco_orm_supports_weights())) "orm")
+
+  for (engine in engines) {
+    args <- c(base_args, list(po_engine = engine))
+
+    fit_w <- muffle_orm_weight_note(
+      do.call(tsco, c(args, list(data = dat$individual, weights = w)))
+    )
+    fit_rep <- do.call(tsco, c(args, list(data = replicated)))
+    fit_unw <- do.call(tsco, c(args, list(data = dat$individual)))
+
+    expect_equal(
+      unname(coef(fit_w)), unname(coef(fit_rep)),
+      tolerance = 1e-5,
+      info = paste("po_engine =", engine)
+    )
+
+    expect_equal(
+      as.numeric(logLik(fit_w)), as.numeric(logLik(fit_rep)),
+      tolerance = 1e-5,
+      info = paste("po_engine =", engine)
+    )
+
+    # ... and the weighted fit must differ from the unweighted one, so that
+    # the comparison above is not satisfied trivially.
+    expect_false(
+      isTRUE(all.equal(unname(coef(fit_w)), unname(coef(fit_unw)),
+                       tolerance = 1e-3)),
+      info = paste("po_engine =", engine)
+    )
+  }
+})
+
+test_that("po_engine = \"auto\" picks a backend that can take the weights", {
+  dat <- make_wine_test_data()
+
+  args <- list(
+    formula = rating ~ temp + contact,
+    data = dat$individual,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
+    stage1 = "po",
+    stage2 = "po",
+    warn_degenerate = FALSE
+  )
+
+  fit_unw <- do.call(tsco, args)
+  expect_identical(fit_unw$stage1_engine, "orm")
+
+  fit_w <- muffle_orm_weight_note(
+    do.call(tsco, c(args, list(weights = rep(1:3, length.out = nrow(dat$individual)))))
+  )
+
+  # On an rms whose orm() cannot take weights, "auto" falls back to VGAM for
+  # the weighted stage only. So a weighted and an unweighted fit of the same
+  # model may use different backends, and agree only to solver tolerance.
+  if (.tsco_orm_supports_weights()) {
+    expect_identical(fit_w$stage1_engine, "orm")
+  } else {
+    expect_identical(fit_w$stage1_engine, "vglm")
+  }
 })
 
 test_that("reported coefficient names do not depend on the fitting engine", {

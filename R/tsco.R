@@ -50,7 +50,15 @@
 #'   refit behavior as `stage1_args`.
 #' @param weights Optional finite, nonnegative multiplicative case weights with
 #'   at least one positive value. For grouped responses, a weight multiplies the
-#'   complete count contribution from that covariate pattern.
+#'   complete count contribution from that covariate pattern. Integer weights
+#'   reproduce a fit to the row-replicated data. Under `po_engine = "auto"` a
+#'   weighted individual-level PO stage uses [rms::orm()] when the installed
+#'   `rms` accepts case weights and falls back to [VGAM::vglm()] when it does
+#'   not, so a weighted and an unweighted fit of the same model may not use the
+#'   same backend and may agree only to solver tolerance. `rms::orm()` also
+#'   notes that weights are ignored by `rms::validate()` and `rms::bootcov()`;
+#'   `tsco()` calls neither, but the note applies if you run them yourself on a
+#'   stage fit.
 #' @param na.action Missing-data action passed to model.frame().
 #' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary
 #'   regressions.
