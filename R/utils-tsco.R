@@ -600,12 +600,12 @@
       engine = object$stage1_engine,
       stage = "stage1",
       kind = object$stage1,
-      response_levels = object$lower_levels,
+      response_levels = .tsco_stage_levels(object, 1L),
       reported_names = .tsco_stage_reported_names(
         object$fit_stage1,
         kind = object$stage1,
         engine = object$stage1_engine,
-        response_levels = object$lower_levels,
+        response_levels = .tsco_stage_levels(object, 1L),
         formula = object$stage1_formula,
         data = object$data_stage1,
         collapsed_label = object$lower_collapsed_label,
@@ -619,12 +619,12 @@
       engine = object$stage2_engine,
       stage = "stage2",
       kind = object$stage2,
-      response_levels = object$collapsed_levels,
+      response_levels = .tsco_stage_levels(object, 2L),
       reported_names = .tsco_stage_reported_names(
         object$fit_stage2,
         kind = object$stage2,
         engine = object$stage2_engine,
-        response_levels = object$collapsed_levels,
+        response_levels = .tsco_stage_levels(object, 2L),
         formula = object$stage2_formula,
         data = object$data_stage2,
         collapsed_label = object$lower_collapsed_label,
@@ -1744,4 +1744,121 @@
     ":",
     target_levels[index]
   )
+}
+
+# -------------------------------------------------------------------------
+# Declared-but-unobserved outcome levels
+# -------------------------------------------------------------------------
+
+#' Which of a stage's declared levels actually carry observations.
+#'
+#' @param y A stage response: a factor, or a matrix of category counts.
+#' @param levels The stage's declared levels, in order.
+.tsco_observed_levels <- function(y, levels) {
+  if (is.matrix(y) || is.data.frame(y)) {
+    totals <- colSums(as.matrix(y))
+    return(levels[levels %in% colnames(as.matrix(y))[totals > 0]])
+  }
+
+  counts <- tabulate(match(as.character(y), levels), nbins = length(levels))
+  levels[counts > 0]
+}
+
+#' Insert zero-probability columns for declared levels that were not fitted.
+#'
+#' A level declared in `levels` but absent from the data has a maximum
+#' likelihood fitted probability of exactly zero, and its threshold sits on the
+#' boundary of the parameter space. Neither backend keeps such a level, so the
+#' fitted probability matrix spans only the observed levels; this restores the
+#' declared layout so that predictions always have one column per outcome level
+#' and rows that still sum to one.
+#'
+#' @param p Probability matrix over `observed`, in that column order.
+#' @param observed,declared Character vectors of level labels.
+.tsco_expand_prob <- function(p, observed, declared) {
+  p <- as.matrix(p)
+
+  if (identical(observed, declared)) {
+    return(p)
+  }
+
+  out <- matrix(
+    0,
+    nrow = nrow(p),
+    ncol = length(declared),
+    dimnames = list(rownames(p), declared)
+  )
+
+  out[, observed] <- p[, observed, drop = FALSE]
+  out
+}
+
+#' Drop declared-but-unobserved levels from a stage response before fitting.
+#'
+#' `rms::orm()` fails with an opaque `'names' attribute` error, and
+#' `VGAM::vglm()` silently drops the level and returns a probability matrix of
+#' the wrong width. Neither is recoverable downstream, so the level is removed
+#' here, recorded, and restored at prediction time by `.tsco_expand_prob()`.
+#'
+#' @param y A stage response: a factor, or a matrix of category counts.
+#' @param levels The stage's declared levels, in order.
+#' @param stage_label Text naming the stage, used in messages.
+#' @return A list with the reduced `y`, the `observed` levels, and the
+#'   `dropped` ones.
+.tsco_drop_unobserved_levels <- function(y, levels, stage_label) {
+  observed <- .tsco_observed_levels(y, levels)
+  dropped <- setdiff(levels, observed)
+
+  if (length(observed) < 2L) {
+    stop(
+      stage_label, " has ", length(observed),
+      " outcome level(s) with observations (",
+      if (length(observed) == 0L) "none" else paste(observed, collapse = ", "),
+      ") out of the ", length(levels), " declared (",
+      paste(levels, collapse = ", "),
+      "). At least two are needed to fit a model. Supply more data or a ",
+      "different `cutoff_level`.",
+      call. = FALSE
+    )
+  }
+
+  if (length(dropped) == 0L) {
+    return(list(y = y, observed = observed, dropped = character()))
+  }
+
+  warning(
+    stage_label, ": outcome level(s) ", paste(dropped, collapse = ", "),
+    " are declared in `levels` but have no observations. They are dropped ",
+    "from the fit and carried through predictions with probability zero; ",
+    "their thresholds are at the boundary of the parameter space. Estimates ",
+    "and tests are conditional on the observed outcome levels.",
+    call. = FALSE
+  )
+
+  if (is.matrix(y) || is.data.frame(y)) {
+    y <- as.matrix(y)[, observed, drop = FALSE]
+  } else {
+    y <- factor(
+      as.character(y),
+      levels = observed,
+      ordered = is.ordered(y)
+    )
+  }
+
+  list(y = y, observed = observed, dropped = dropped)
+}
+
+#' A stage's observed levels, falling back to its declared levels.
+#'
+#' @param object A "tsco" object.
+#' @param stage 1 or 2.
+.tsco_stage_levels <- function(object, stage) {
+  declared <- if (stage == 1L) object$lower_levels else object$collapsed_levels
+  observed <- if (stage == 1L) {
+    object$stage1_observed_levels
+  } else {
+    object$stage2_observed_levels
+  }
+
+  if (is.null(observed)) declared else observed
 }

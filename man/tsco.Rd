@@ -65,7 +65,15 @@ refit behavior as \code{stage1_args}.}
 
 \item{weights}{Optional finite, nonnegative multiplicative case weights with
 at least one positive value. For grouped responses, a weight multiplies the
-complete count contribution from that covariate pattern.}
+complete count contribution from that covariate pattern. Integer weights
+reproduce a fit to the row-replicated data. Under \code{po_engine = "auto"} a
+weighted individual-level PO stage uses \code{\link[rms:orm]{rms::orm()}} when the installed
+\code{rms} accepts case weights and falls back to \code{\link[VGAM:vglm]{VGAM::vglm()}} when it does
+not, so a weighted and an unweighted fit of the same model may not use the
+same backend and may agree only to solver tolerance. \code{rms::orm()} also
+notes that weights are ignored by \code{rms::validate()} and \code{rms::bootcov()};
+\code{tsco()} calls neither, but the note applies if you run them yourself on a
+stage fit.}
 
 \item{na.action}{Missing-data action passed to model.frame().}
 

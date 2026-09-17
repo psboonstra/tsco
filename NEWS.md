@@ -1,5 +1,26 @@
 # tsco 0.0.0.9000
 
+- **Bug fix:** a level declared in `levels` but with no observations no longer
+  breaks the fit. `rms::orm()` failed with an opaque
+  `'names' attribute [5] must be the same length as the vector [4]`, raised
+  inside `orm.fit()`; `VGAM::vglm()` silently dropped the level and returned a
+  narrower probability matrix, which surfaced as
+  `Predicted probability matrix has 4 columns, but 5 levels were expected`.
+  Both stages, individual-level and grouped-count responses, and interior as
+  well as trailing levels were affected. Such a level has a maximum likelihood
+  fitted probability of exactly zero and a threshold on the boundary of the
+  parameter space, so `tsco()` now drops it from the fit with a warning naming
+  it, and `predict()` restores it as an all-zero column. Estimates and tests
+  are conditional on the observed outcome levels; because the boundary sits in
+  a threshold common to the full and reduced models, joint tests keep their
+  usual degrees of freedom and chi-squared reference. A stage left with fewer
+  than two observed levels is a clear error rather than a backend failure.
+  Fitted objects gain `stage1_observed_levels`, `stage2_observed_levels` and
+  `unobserved_levels`.
+- Reported threshold names now follow the *observed* cutpoints. With an
+  interior level unobserved the thresholds are `Y<=0`, `Y<=1`, `Y<=3`, not the
+  first three declared levels.
+
 - **Breaking:** reported coefficient names no longer depend on the fitting
   engine. Proportional-odds thresholds are named for the level they bound on
   the reported lower-tail scale (`Y<=2`, and `Y<C` for the stage-2 collapsed

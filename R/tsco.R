@@ -544,6 +544,43 @@ tsco <- function(
   names(stage1_factor_levels) <- factor_predictors
 
   # --------------------------------------------------------------------------
+  # Declared-but-unobserved outcome levels.
+  #
+  # A level named in `levels` with no observations has a fitted probability of
+  # exactly zero and a threshold on the boundary of the parameter space.
+  # Neither backend represents that: `rms::orm()` fails with an opaque
+  # `'names' attribute` error and `VGAM::vglm()` silently returns a narrower
+  # probability matrix. Drop such levels from the fit here, keeping the
+  # declared set for reporting, and restore them at zero mass in `predict()`.
+  # --------------------------------------------------------------------------
+
+  stage1_drop <- .tsco_drop_unobserved_levels(
+    if (is_grouped) y1_counts else d1$.tsco_y_stage1,
+    levels = lower_levels,
+    stage_label = paste0("Stage 1 (Y | Y < ", cutoff_level, ")")
+  )
+
+  stage2_drop <- .tsco_drop_unobserved_levels(
+    if (is_grouped) y2_counts else d2$.tsco_y_stage2,
+    levels = collapsed_levels,
+    stage_label = paste0("Stage 2 (collapsed outcome at ", cutoff_level, ")")
+  )
+
+  stage1_observed_levels <- stage1_drop$observed
+  stage2_observed_levels <- stage2_drop$observed
+
+  if (is_grouped) {
+    d1$.tsco_y_stage1 <- I(stage1_drop$y)
+    d2$.tsco_y_stage2 <- I(stage2_drop$y)
+  } else {
+    d1$.tsco_y_stage1 <- stage1_drop$y
+    d2$.tsco_y_stage2 <- stage2_drop$y
+  }
+
+  y1_counts <- y1_counts[, stage1_observed_levels, drop = FALSE]
+  y2_counts <- y2_counts[, stage2_observed_levels, drop = FALSE]
+
+  # --------------------------------------------------------------------------
   # Fit models. `orm()` is used only where it supports the response structure:
   # individual-level proportional-odds stages. All other stages use VGAM.
   # --------------------------------------------------------------------------
@@ -583,17 +620,19 @@ tsco <- function(
     fit1,
     engine = stage1_engine,
     newdata = d1,
-    levels = lower_levels
+    levels = stage1_observed_levels
   )
   p2_hat <- .tsco_predict_stage_prob(
     fit2,
     engine = stage2_engine,
     newdata = d2,
-    levels = collapsed_levels
+    levels = stage2_observed_levels
   )
 
-  p1_hat <- .tsco_align_prob(p1_hat, lower_levels)
-  p2_hat <- .tsco_align_prob(p2_hat, collapsed_levels)
+  # Aligned and scored on the observed levels: an unobserved level contributes
+  # no counts and zero probability, so it adds nothing to the log-likelihood.
+  p1_hat <- .tsco_align_prob(p1_hat, stage1_observed_levels)
+  p2_hat <- .tsco_align_prob(p2_hat, stage2_observed_levels)
 
   if (!is.null(w1)) {
     y1_counts_ll <- y1_counts * as.numeric(w1)
@@ -623,6 +662,9 @@ tsco <- function(
     levels = y_levels,
     lower_levels = lower_levels,
     upper_levels = upper_levels,
+    stage1_observed_levels = stage1_observed_levels,
+    stage2_observed_levels = stage2_observed_levels,
+    unobserved_levels = c(stage1_drop$dropped, stage2_drop$dropped),
     lower_collapsed_label = lower_collapsed_label,
     collapsed_levels = collapsed_levels,
     grouped = is_grouped,

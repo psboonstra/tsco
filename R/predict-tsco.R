@@ -133,9 +133,12 @@ predict.tsco <- function(
     object$fit_stage2,
     engine = object$stage2_engine,
     pred_data = pred_data,
-    levels = object$collapsed_levels
+    levels = .tsco_stage_levels(object, 2L)
   )
-  p2 <- .tsco_align_prob(p2, object$collapsed_levels)
+  p2 <- .tsco_align_prob(p2, .tsco_stage_levels(object, 2L))
+  p2 <- .tsco_expand_prob(
+    p2, .tsco_stage_levels(object, 2L), object$collapsed_levels
+  )
 
   n <- nrow(pred_data)
 
@@ -166,12 +169,16 @@ predict.tsco <- function(
       object$fit_stage1,
       engine = object$stage1_engine,
       pred_data = pred_data[supported, , drop = FALSE],
-      levels = object$lower_levels
+      levels = .tsco_stage_levels(object, 1L)
     )
 
     p1_supported <- .tsco_align_prob(
       p1_supported,
-      object$lower_levels
+      .tsco_stage_levels(object, 1L)
+    )
+
+    p1_supported <- .tsco_expand_prob(
+      p1_supported, .tsco_stage_levels(object, 1L), object$lower_levels
     )
 
     if (nrow(p1_supported) != sum(supported)) {
