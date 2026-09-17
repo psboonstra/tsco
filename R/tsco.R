@@ -674,16 +674,26 @@ tsco <- function(
     fit_stage1 = fit1,
     fit_stage2 = fit2,
 
-    # For prediction and LRT refits
-    terms_rhs = stats::delete.response(tt),
+    # For prediction and LRT refits. The terms are taken from the model frame,
+    # not from `formula`, because only the model-frame terms carry `predvars`:
+    # the data-dependent constants of basis terms such as `poly(x, 2)`,
+    # `splines::ns(x)` and `scale(x)`. Without them `model.frame()` on
+    # `newdata` would rebuild those bases from the new rows alone and return
+    # silently wrong predictions.
+    terms_rhs = stats::delete.response(stats::terms(mf)),
     predict_data = predict_data,
     data_stage1 = d1,
     data_stage2 = d2,
     weights_stage1 = w1,
     weights_stage2 = w2,
 
-    # Weighted category totals, used for closed-form intercept-only fits in
-    # joint likelihood-ratio tests.
+    # Weighted category count matrices on the observed stage levels, one row
+    # per stage-data row. Joint likelihood-ratio tests score reduced fits
+    # against these with `.tsco_count_loglik()` so that full and reduced
+    # log-likelihoods share the package's constant-free convention; the
+    # column totals give the closed-form intercept-only fit.
+    counts_stage1 = y1_counts_ll,
+    counts_stage2 = y2_counts_ll,
     totals_stage1 = colSums(y1_counts_ll),
     totals_stage2 = colSums(y2_counts_ll),
     stage1_args = stage1_args,

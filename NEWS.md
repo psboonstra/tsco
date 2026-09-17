@@ -1,5 +1,26 @@
 # tsco 0.0.0.9000
 
+- **Bug fix:** the joint likelihood-ratio test for a single-predictor model
+  fitted to a grouped-count (`cbind(...)`) response was badly
+  anti-conservative. The full model's log-likelihood was taken from
+  `VGAM::vglm()`, which includes the multinomial combinatorial constants for
+  grouped data, while the closed-form intercept-only fit omits them; on the
+  wine data the statistic was 162.2 where the individual-level fit gives 24.2.
+  Multi-term LRTs were unaffected because the constants cancel between two
+  refits. All LRTs now score both full and reduced models on the package's
+  constant-free scale, so grouped and individual representations of the same
+  data give the same test. Fitted objects gain `counts_stage1` and
+  `counts_stage2`.
+- **Bug fix:** `predict()` with raw `newdata` was silently wrong for formulas
+  containing data-dependent basis terms such as `poly(x, 2)`, `splines::ns(x)`
+  or `scale(x)`, because the basis was rebuilt from `newdata` alone. The stored
+  terms now carry the fitted basis constants (`predvars`).
+- **Bug fix:** `predict(unsupported_stage1 = "empirical")` fell back to a
+  uniform split, with a warning, for a grouped-count fit whose `levels`
+  declared an unobserved lower category, and ignored case weights in every
+  case. It now uses the weighted stage-1 category totals and gives an
+  unobserved level probability zero, consistent with the rest of the package.
+
 - **Bug fix:** a level declared in `levels` but with no observations no longer
   breaks the fit. `rms::orm()` failed with an opaque
   `'names' attribute [5] must be the same length as the vector [4]`, raised

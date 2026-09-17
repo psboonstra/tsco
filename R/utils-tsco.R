@@ -1147,9 +1147,12 @@
 #' category distribution and its log-likelihood has a closed form. Using that
 #' form avoids refitting an intercept-only model, which not every backend
 #' supports: `rms::orm(y ~ 1)` fails outright on some versions of rms. The
-#' constant conventions match `.tsco_count_loglik()` and both backends, which
-#' all omit multinomial combinatorial constants, so this value is directly
-#' comparable with the full model's.
+#' value omits multinomial combinatorial constants, matching
+#' `.tsco_count_loglik()` and therefore `object$logLik_stage1` and
+#' `object$logLik_stage2`. It is *not* comparable with a grouped-count
+#' `VGAM::vglm()` fit's own `@criterion["loglikelihood"]`, which includes
+#' those constants; `.tsco_joint_lrt_tests()` never uses backend
+#' log-likelihoods for that reason.
 #'
 #' @param totals Weighted category totals for the stage response.
 #' @return A list with `loglik` and `df`.
@@ -1196,17 +1199,49 @@
   stage1_engine <- object$stage1_engine
   stage2_engine <- object$stage2_engine
 
-  ll1_full <- .tsco_stage_loglik(object$fit_stage1, stage1_engine)
-  ll2_full <- .tsco_stage_loglik(object$fit_stage2, stage2_engine)
+  # Every log-likelihood entering a likelihood-ratio statistic is computed on
+  # the package's constant-free scale (`.tsco_count_loglik()`), never taken
+  # from a backend. The backends do not agree with each other or with the
+  # closed-form intercept-only fit: `VGAM::vglm()` on a grouped-count response
+  # includes the multinomial combinatorial constants in `@criterion`, while
+  # `rms::orm()` and the closed form omit them. Those constants cancel between
+  # two refits of the same grouped data, but not between a grouped `vglm` fit
+  # and the closed form, so mixing scales made a grouped `y ~ treatment` LRT
+  # wildly anti-conservative.
+  ll1_full <- object$logLik_stage1
+  ll2_full <- object$logLik_stage2
 
   df1_full <- .tsco_df(object$fit_stage1)
   df2_full <- .tsco_df(object$fit_stage2)
 
-  if (!is.finite(ll1_full) || !is.finite(ll2_full)) {
+  if (is.null(ll1_full) || is.null(ll2_full) ||
+      !is.finite(ll1_full) || !is.finite(ll2_full)) {
     stop(
       "Could not extract full-model log-likelihoods for LRTs.",
       call. = FALSE
     )
+  }
+
+  if (is.null(object$counts_stage1) || is.null(object$counts_stage2)) {
+    stop(
+      "Joint LRTs require the stage count matrices stored in the tsco object.",
+      call. = FALSE
+    )
+  }
+
+  stage1_levels <- .tsco_stage_levels(object, 1L)
+  stage2_levels <- .tsco_stage_levels(object, 2L)
+
+  # Score a reduced stage fit against the stored weighted counts.
+  reduced_loglik <- function(fit, engine, data, counts, levels) {
+    p <- .tsco_predict_stage_prob(
+      fit,
+      engine = engine,
+      newdata = data,
+      levels = levels
+    )
+    p <- .tsco_align_prob(p, levels)
+    .tsco_count_loglik(counts, p)
   }
 
   stage1_args <- object$stage1_args
@@ -1256,11 +1291,17 @@
         stage_args = stage2_args
       )
 
-      ll1_reduced <- .tsco_stage_loglik(fit1_reduced, stage1_engine)
-      ll2_reduced <- .tsco_stage_loglik(fit2_reduced, stage2_engine)
+      ll1_reduced <- reduced_loglik(
+        fit1_reduced, stage1_engine, object$data_stage1,
+        object$counts_stage1, stage1_levels
+      )
+      ll2_reduced <- reduced_loglik(
+        fit2_reduced, stage2_engine, object$data_stage2,
+        object$counts_stage2, stage2_levels
+      )
 
       if (!is.finite(ll1_reduced) || !is.finite(ll2_reduced)) {
-        stop("Could not extract reduced-model log-likelihoods.", call. = FALSE)
+        stop("Could not compute reduced-model log-likelihoods.", call. = FALSE)
       }
 
       df1_reduced <- .tsco_df(fit1_reduced)
@@ -1457,68 +1498,46 @@
 }
 
 
+#' Empirical distribution of the lower categories among stage-1 observations.
+#'
+#' Used by `predict(unsupported_stage1 = "empirical")`. The distribution is
+#' taken from the weighted category totals stored at fitting time, so case
+#' weights are honoured and, consistent with the rest of the package, a
+#' declared lower level with no observations receives probability exactly
+#' zero rather than a share of a uniform split.
+#'
+#' @param object A fitted `tsco` object.
+#' @return A named probability vector over `object$lower_levels`.
 .tsco_empirical_lower_probs <- function(object) {
-  if (is.null(object$data_stage1) || is.null(object$stage1_formula)) {
+  totals <- object$totals_stage1
+
+  if (is.null(totals) || is.null(names(totals))) {
     stop(
       "Cannot compute empirical lower-category probabilities because ",
-      "stage-1 data are not stored in the TSCO object.",
+      "stage-1 category totals are not stored in the TSCO object.",
       call. = FALSE
     )
   }
 
-  lhs_vars <- all.vars(object$stage1_formula[[2L]])
+  lower <- object$lower_levels
 
-  if (length(lhs_vars) != 1L) {
-    stop(
-      "Could not identify the stage-1 response variable.",
-      call. = FALSE
-    )
-  }
+  counts <- stats::setNames(numeric(length(lower)), lower)
+  common <- intersect(names(totals), lower)
+  counts[common] <- as.numeric(totals[common])
 
-  yname <- lhs_vars[1L]
-
-  if (!yname %in% names(object$data_stage1)) {
-    stop(
-      "Stage-1 response variable not found in stored stage-1 data.",
-      call. = FALSE
-    )
-  }
-
-  y <- object$data_stage1[[yname]]
-
-  if (is.matrix(y) || is.data.frame(y)) {
-    counts <- colSums(as.matrix(y))
-    counts <- counts[object$lower_levels]
-  } else {
-    counts <- table(
-      factor(
-        as.character(y),
-        levels = object$lower_levels
-      )
-    )
-    counts <- as.numeric(counts)
-    names(counts) <- object$lower_levels
-  }
-
-  if (anyNA(counts) || sum(counts) <= 0) {
+  if (any(!is.finite(counts)) || sum(counts) <= 0) {
     warning(
       "Could not compute empirical lower-category probabilities; ",
-      "using a uniform split instead.",
+      "using a uniform split among the observed lower categories instead.",
       call. = FALSE
     )
 
-    out <- rep(
-      1 / length(object$lower_levels),
-      length(object$lower_levels)
-    )
-    names(out) <- object$lower_levels
-    return(out)
+    observed <- intersect(.tsco_stage_levels(object, 1L), lower)
+    counts[] <- 0
+    counts[observed] <- 1
   }
 
-  out <- as.numeric(counts) / sum(counts)
-  names(out) <- object$lower_levels
-
-  out
+  counts / sum(counts)
 }
 
 
