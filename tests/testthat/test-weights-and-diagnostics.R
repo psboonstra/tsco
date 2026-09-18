@@ -657,8 +657,11 @@ test_that("weights stay aligned under a custom na.action that records row names"
   dat <- make_wine_test_data()
   wine <- dat$individual
 
-  # An na.action that is valid but records the omitted rows by *name*, not
-  # position, and data whose row names are not positions.
+  # A deliberately non-standard na.action: it removes incomplete rows but
+  # records them by row *name*, not position, so generic `naresid()`-style
+  # restoration would misread it. The package must not depend on how an
+  # na.action records omissions, only on what it returns. The data's row
+  # names are chosen not to be row positions.
   na_by_name <- function(object, ...) {
     keep <- stats::complete.cases(object)
     out <- object[keep, , drop = FALSE]
@@ -780,4 +783,42 @@ test_that("non-finite values after transformation in newdata give NA rows", {
   expect_warning(pp <- predict(fit_p, newdata = nd_p), "missing or non-finite")
   expect_identical(unname(attr(pp, "incomplete")), c(FALSE, TRUE, FALSE))
   expect_true(all(is.finite(pp[c(1L, 3L), ])))
+})
+
+
+# --- weights do not leak into the stored terms ----------------------------------
+
+test_that("passing weights through model.frame() leaves terms_rhs formula-only", {
+  # `model.frame(weights = )` adds a `(weights)` column but must not add a
+  # weights variable to the terms object; if it ever did, raw-`newdata`
+  # prediction (which has no weights) would fail or, worse, evaluate wrongly.
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+  wine$x <- as.numeric(seq_len(nrow(wine)))
+
+  set.seed(2)
+  w <- sample(1:3, nrow(wine), replace = TRUE)
+  wine$temp[c(2, 9)] <- NA
+
+  for (rhs in c("poly(x, 2) + temp", "log(x) + temp", "scale(x) + contact")) {
+    fit <- fit_wine(wine, rhs = rhs, weights = w, po_engine = "vglm")
+    tt <- fit$terms_rhs
+
+    vars <- vapply(as.list(attr(tt, "variables"))[-1L], deparse, character(1L))
+    pv <- vapply(as.list(attr(tt, "predvars"))[-1L], function(v) deparse(v)[1L], character(1L))
+
+    expect_false(any(grepl("weights", vars, fixed = TRUE)))
+    expect_false(any(grepl("weights", attr(tt, "term.labels"), fixed = TRUE)))
+    expect_false(any(grepl("weights", pv, fixed = TRUE)))
+    expect_length(vars, 2L)
+    expect_false("(weights)" %in% names(fit$predict_data))
+
+    # Raw newdata (no weights column) predicts exactly what predict(fit) does.
+    # predict(fit) is indexed by model-frame row, i.e. after na.omit, which
+    # only drops rows when `temp` is in the formula.
+    kept <- as.integer(rownames(fit$predict_data)[1:3])
+    p_raw <- predict(fit, newdata = wine[kept, c("x", "temp", "contact")])
+    p_fit <- predict(fit)
+    expect_equal(unclass(p_raw)[, ], p_fit[1:3, ], tolerance = 1e-10, ignore_attr = TRUE)
+  }
 })
