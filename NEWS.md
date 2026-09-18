@@ -1,3 +1,5 @@
+# tsco 0.1.0
+
 # tsco 0.0.0.9000
 
 - `weights` of length `nrow(data)` are now passed through `model.frame()` as

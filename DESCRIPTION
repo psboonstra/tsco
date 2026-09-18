@@ -1,6 +1,6 @@
 Package: tsco
 Title: Two-Stage Conditional Odds Models
-Version: 0.0.0.9000
+Version: 0.1.0
 Authors@R: 
     person(given = "Philip S.", family = "Boonstra", email = "phil@umich.edu", role = c("aut", "cre"))
 Description: Implements two-stage conditional odds (TSCO) models for
