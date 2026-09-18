@@ -22,8 +22,11 @@ or grouped covariate patterns.}
 \item{type}{Prediction type. \code{"prob"} and \code{"response"} return unconditional
 category probabilities. \code{"class"} returns the most probable outcome
 category. \code{"stage"} returns stage-specific probabilities, combined
-unconditional probabilities, the stage-2 lower-partition mass, and an
-indicator of rows unsupported by the stage-1 model.}
+unconditional probabilities, the stage-2 lower-partition mass, and
+logical indicators of rows unsupported by the stage-1 model
+(\code{unsupported_stage1}), rows whose factor level was seen only in
+zero-weight observations (\code{unfitted}), and rows with missing or
+non-finite predictors (\code{incomplete}).}
 
 \item{unsupported_stage1}{How to handle prediction rows whose factor levels
 were not represented in the stage-1 fitting data. Options are:
@@ -45,7 +48,8 @@ If \code{type = "prob"} or \code{"response"}, a matrix of predicted
 probabilities with one column per original outcome level. If
 \code{type = "class"}, an ordered factor. If \code{type = "stage"}, a list with
 stage-specific probabilities, combined probabilities, lower-partition
-mass, \code{unsupported_stage1}, and the unsupported-row handling method.
+mass, \code{unsupported_stage1}, the unsupported-row handling method, and the
+\code{unfitted} and \code{incomplete} row indicators.
 }
 \description{
 Computes predicted probabilities or predicted classes from a fitted
@@ -81,4 +85,9 @@ factor level that occurred in no positive-weight observation, neither stage
 has information about it and every probability for that row is \code{NA}; the
 returned matrix then carries a logical \code{unfitted} attribute marking those
 rows.
+
+A prediction row with a missing or non-finite value in any predictor (for
+example \code{log(x)} at \code{x = 0}) is likewise returned as all \code{NA}, with a
+warning, and marked in a logical \code{incomplete} attribute; the remaining rows
+are predicted normally.
 }

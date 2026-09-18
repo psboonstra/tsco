@@ -75,9 +75,12 @@ reproduce a fit to the row-replicated data, including its log-likelihood,
 and the sample size used by BIC and \code{\link[=nobs]{nobs()}} is the weighted count
 \code{sum(weights)} (for grouped data, the weighted sum of the count totals),
 reported as \code{n_weighted}; \code{n_obs} continues to count represented
-observations without weights. For non-integer analytic or survey weights
-this is a convention rather than an effective sample size, and BIC should
-be interpreted accordingly. A row whose weight is exactly zero
+observations without weights. Weights are treated as frequency weights
+throughout: in the log-likelihood, in the standard errors, in Wald and
+likelihood-ratio tests, and in BIC. Non-integer weights are accepted and
+interpreted the same way. Survey (design) weights are out of scope: no
+design-based variance is computed, so the reported covariance and tests
+are not survey-valid under such weights. A row whose weight is exactly zero
 contributes nothing to the likelihood and is removed before fitting, so
 it does not count towards \code{n_obs}, does not establish an observed
 predictor or outcome level, and cannot make a factor level supported in
@@ -92,7 +95,12 @@ notes that weights are ignored by \code{rms::validate()} and \code{rms::bootcov(
 \code{tsco()} calls neither, but the note applies if you run them yourself on a
 stage fit.}
 
-\item{na.action}{Missing-data action passed to model.frame().}
+\item{na.action}{Missing-data action passed to \code{\link[=model.frame]{model.frame()}}. It must
+remove or reject incomplete rows (\code{na.omit}, the default, \code{na.exclude},
+\code{na.fail}, or a user function that does the same); rows with a missing or
+non-finite predictor or a missing response that survive it are an error.
+Weights of length \code{nrow(data)} are passed through \code{model.frame()} with the
+data, so they stay aligned under any such function.}
 
 \item{warn_degenerate}{If TRUE, warn when K = 3, which reduces to two binary
 regressions.}
