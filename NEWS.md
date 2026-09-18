@@ -1,5 +1,25 @@
 # tsco 0.0.0.9000
 
+- New `nobs()` method returning the frequency-weighted sample size
+  `n_weighted`, matching the `nobs` attribute of `logLik()` and the sample
+  size BIC uses. The documentation had referred to `nobs()` without the method
+  existing.
+- **Bug fix:** `predict()` with a missing value in a numeric predictor of
+  `newdata` failed for the whole call ("could not be normalized" under
+  `rms::orm()`, "unexpected number of rows" under `VGAM::vglm()`). Rows with
+  any missing predictor are now returned as all-`NA`, with a warning and an
+  `incomplete` attribute, and the remaining rows are predicted normally. A
+  missing factor value is now reported the same way rather than as an
+  unsupported factor level.
+- **Breaking:** `data` is required and must be a data frame. The undocumented
+  `parent.frame()` fallback is removed; it was untested and failed with
+  `weights`.
+- The `weights` documentation now states that weights are frequency weights
+  throughout, including in standard errors and tests, and that survey (design)
+  weights are out of scope.
+- Comments and internal documentation no longer cite manuscript section or
+  equation numbers, which may change; variants are named (`PO|C|MR`, etc.).
+
 - Weighted `rms::orm()` stage fits no longer emit rms's note that weights are
   ignored by `validate()` and `bootcov()`. `tsco()` calls neither; the caveat
   stays in `?tsco` under `weights`. Only that one message is silenced.

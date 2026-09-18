@@ -1,7 +1,7 @@
 test_that("coef and vcov methods are dimensionally consistent", {
   dat <- make_wine_test_data()
 
-  # This is the manuscript's headline variant (Section 2.1.1): conditional PO
+  # This is the manuscript's headline PO|C|MR variant: conditional PO
   # below the cutoff, marginal (saturated) multinomial at/above it.
   fit <- tsco(
     dat$grouped_formula,

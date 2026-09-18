@@ -1,7 +1,7 @@
 test_that("PO|C|MR (stage1 = po, stage2 = multinomial) fits and is well-formed", {
   dat <- make_wine_test_data()
 
-  # This is the manuscript's headline variant (Section 2.1.1): conditional PO
+  # This is the manuscript's headline PO|C|MR variant: conditional PO
   # below the cutoff, marginal (saturated) multinomial at/above it.
   fit <- tsco(
     dat$grouped_formula,
@@ -42,7 +42,7 @@ test_that("PO|C|MR (stage1 = po, stage2 = multinomial) fits and is well-formed",
 test_that("MR|C|PO (stage1 = multinomial, stage2 = po) fits and is well-formed", {
   dat <- make_wine_test_data()
 
-  # The mirror-image variant flagged in Section 2.1.3 as a natural extension:
+  # The mirror-image variant the manuscript flags as a natural extension:
   # conditional (saturated) multinomial below the cutoff, marginal PO at/above.
   fit <- tsco(
     dat$grouped_formula,
@@ -90,14 +90,14 @@ test_that("all four stage1/stage2 combinations produce parameter counts matching
     )
   }
 
-  # --- PO|C|PO: K - 1 + 2p total (manuscript, Section 2.1.2) --------------
+  # --- PO|C|PO: K - 1 + 2p total (manuscript) -------------------------------
   fit_po_po <- fit_combo("po", "po")
   expect_equal(
     length(coef(fit_po_po)),
     (K - 1L) + 2L * p
   )
 
-  # --- PO|C|MR: (C - 1 + p) + (K - C)(p + 1) (Section 2.1.1) --------------
+  # --- PO|C|MR: (C - 1 + p) + (K - C)(p + 1) (manuscript) -------------------
   # Here "C" in the manuscript's formula is cutoff_index.
   fit_po_mr <- fit_combo("po", "multinomial")
   expect_equal(

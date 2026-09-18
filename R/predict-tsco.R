@@ -33,6 +33,10 @@
 #' returned matrix then carries a logical `unfitted` attribute marking those
 #' rows.
 #'
+#' A prediction row with a missing value in any predictor is likewise returned
+#' as all `NA`, with a warning, and marked in a logical `incomplete` attribute;
+#' the remaining rows are predicted normally.
+#'
 #' @param object An object of class `"tsco"`.
 #' @param newdata Optional data frame containing predictor values at which to
 #'   predict. If omitted, predictions are returned for the original observations
@@ -93,7 +97,6 @@ predict.tsco <- function(
   # fitting time because their weight was exactly zero. Neither stage can say
   # anything about them, so they are returned as all-NA rows.
   unfitted <- .tsco_unfitted_rows(object, pred_data)
-  fitted_rows <- !unfitted
 
   if (any(unfitted)) {
     warning(
@@ -104,6 +107,23 @@ predict.tsco <- function(
       call. = FALSE
     )
   }
+
+  # Rows with a missing value in any predictor. The model frame is built with
+  # `na.pass`, so these reach this point; neither backend handles them
+  # row-wise (`orm` returns NA that later fails normalization, `vglm` drops
+  # the row and the row count no longer matches). Return them as all-NA rows
+  # and predict only the complete ones.
+  incomplete <- .tsco_incomplete_rows(object, pred_data) & !unfitted
+
+  if (any(incomplete)) {
+    warning(
+      sum(incomplete), " prediction row(s) have missing predictor values; ",
+      "all probabilities for these rows are returned as NA.",
+      call. = FALSE
+    )
+  }
+
+  fitted_rows <- !unfitted & !incomplete
 
   unsupported <- .tsco_stage1_unsupported_rows(object, pred_data) & fitted_rows
   supported <- !unsupported & fitted_rows
@@ -334,6 +354,10 @@ predict.tsco <- function(
 
   if (any(unfitted)) {
     attr(prob, "unfitted") <- unfitted
+  }
+
+  if (any(incomplete)) {
+    attr(prob, "incomplete") <- incomplete
   }
 
   # --------------------------------------------------------------------------

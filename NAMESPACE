@@ -2,6 +2,7 @@
 
 S3method(coef,tsco)
 S3method(logLik,tsco)
+S3method(nobs,tsco)
 S3method(predict,tsco)
 S3method(print,summary.tsco)
 S3method(print,tsco)

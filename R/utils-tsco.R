@@ -300,7 +300,7 @@
 #' scale.
 #'
 #' The manuscript parameterizes both submodels with a subtractive convention
-#' on x'beta (Eq. 1 for PO, Eq. 2 for MR/multinomial). Multinomial coefficients
+#' on x'beta, for both the PO and the MR/multinomial submodel. Multinomial coefficients
 #' are reported in that parameterization. For PO stages, covariate coefficients
 #' use the manuscript's sign convention, but thresholds use the common
 #' lower-tail representation `Pr(Y <= j | X) = expit(gamma_j + x'beta)`.
@@ -1541,6 +1541,26 @@
   }
 
   out
+}
+
+#' Rows of prediction data with a missing value in any model predictor.
+#'
+#' Only the model-frame predictor columns count; extra columns in `newdata`
+#' are ignored. An intercept-only model has no predictors and no incomplete
+#' rows.
+#'
+#' @param object A fitted `tsco` object.
+#' @param newdata Prepared prediction data.
+#' @return A logical vector, `TRUE` for rows that cannot be predicted.
+#' @noRd
+.tsco_incomplete_rows <- function(object, newdata) {
+  cols <- intersect(names(object$predict_data), names(newdata))
+
+  if (length(cols) == 0L) {
+    return(rep(FALSE, nrow(newdata)))
+  }
+
+  !stats::complete.cases(newdata[, cols, drop = FALSE])
 }
 
 .tsco_stage1_unsupported_rows <- function(object, newdata) {

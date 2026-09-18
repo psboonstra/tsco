@@ -60,9 +60,12 @@
 #'   and the sample size used by BIC and [nobs()] is the weighted count
 #'   `sum(weights)` (for grouped data, the weighted sum of the count totals),
 #'   reported as `n_weighted`; `n_obs` continues to count represented
-#'   observations without weights. For non-integer analytic or survey weights
-#'   this is a convention rather than an effective sample size, and BIC should
-#'   be interpreted accordingly. A row whose weight is exactly zero
+#'   observations without weights. Weights are treated as frequency weights
+#'   throughout: in the log-likelihood, in the standard errors, in Wald and
+#'   likelihood-ratio tests, and in BIC. Non-integer weights are accepted and
+#'   interpreted the same way. Survey (design) weights are out of scope: no
+#'   design-based variance is computed, so the reported covariance and tests
+#'   are not survey-valid under such weights. A row whose weight is exactly zero
 #'   contributes nothing to the likelihood and is removed before fitting, so
 #'   it does not count towards `n_obs`, does not establish an observed
 #'   predictor or outcome level, and cannot make a factor level supported in
@@ -124,8 +127,11 @@ tsco <- function(
   stage1_args <- .tsco_validate_stage_args(stage1_args, "stage1_args")
   stage2_args <- .tsco_validate_stage_args(stage2_args, "stage2_args")
 
-  if (missing(data)) {
-    data <- parent.frame()
+  # `data` is required. A `parent.frame()` fallback used to exist; it was
+  # untested and broke as soon as `weights` were supplied (`nrow()` of an
+  # environment is NULL), and the documentation has always said a data frame.
+  if (missing(data) || !is.data.frame(data)) {
+    stop("`data` must be supplied and must be a data frame.", call. = FALSE)
   }
 
   if (length(formula) != 3L) {
@@ -770,8 +776,8 @@ tsco <- function(
   # weights (times the row's count total for grouped data). The
   # log-likelihood is on that replicated scale, so BIC and `nobs()` use these
   # rather than the number of rows or unweighted counts; with no weights the
-  # two coincide. For arbitrary analytic or survey weights this is a
-  # convention, not a theorem.
+  # two coincide. Non-integer weights get the same frequency-weight treatment;
+  # survey weights are out of scope (nothing here is design-based).
   weighted <- !is.null(w_all)
   n_weighted <- sum(y2_counts_ll)
   n_stage1_weighted <- sum(y1_counts_ll)

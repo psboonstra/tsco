@@ -564,3 +564,88 @@ test_that("weighted orm fits do not pass on rms's validate()/bootcov() weights n
   expect_false(any(grepl("weights are ignored in model validation", seen, fixed = TRUE)))
   expect_true(fit$weighted)
 })
+
+
+# --- nobs(), required data, missing predictors in newdata ---------------------
+
+test_that("nobs() returns the frequency-weighted sample size", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+
+  fit <- fit_wine(wine)
+  expect_equal(nobs(fit), nrow(wine))
+  expect_equal(nobs(fit), attr(logLik(fit), "nobs"))
+
+  set.seed(5)
+  w <- sample(1:3, nrow(wine), replace = TRUE)
+  fit_w <- fit_wine(wine, weights = w)
+  expect_equal(nobs(fit_w), sum(w))
+  expect_equal(nobs(fit_w), attr(logLik(fit_w), "nobs"))
+  expect_equal(BIC(fit_w), -2 * as.numeric(logLik(fit_w)) + log(nobs(fit_w)) * attr(logLik(fit_w), "df"))
+})
+
+
+test_that("`data` is required and must be a data frame", {
+  dat <- make_wine_test_data()
+  rating <- dat$individual$rating
+  temp <- dat$individual$temp
+
+  expect_error(
+    tsco(rating ~ temp, levels = dat$levels, cutoff_level = dat$cutoff_level,
+         stage1 = "po", stage2 = "po", warn_degenerate = FALSE),
+    "`data` must be supplied"
+  )
+
+  expect_error(
+    tsco(rating ~ temp, data = as.list(dat$individual), levels = dat$levels,
+         cutoff_level = dat$cutoff_level, stage1 = "po", stage2 = "po",
+         warn_degenerate = FALSE),
+    "must be a data frame"
+  )
+})
+
+
+test_that("a missing predictor value in newdata gives an NA row, not a failure", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+  wine$z <- as.numeric(seq_len(nrow(wine)))
+
+  nd <- data.frame(
+    z = c(10, NA, 30, 40),
+    temp = factor(c("cold", "warm", NA, "warm"), levels = levels(wine$temp))
+  )
+  nd_ok <- nd[c(1L, 4L), , drop = FALSE]
+
+  for (engine in c("orm", "vglm")) {
+    for (stage2 in c("po", "multinomial")) {
+      fit <- tsco(
+        rating ~ z + temp,
+        data = wine,
+        levels = dat$levels,
+        cutoff_level = dat$cutoff_level,
+        stage1 = "po",
+        stage2 = stage2,
+        po_engine = engine,
+        warn_degenerate = FALSE
+      )
+
+      expect_warning(p <- predict(fit, newdata = nd), "missing predictor values")
+
+      expect_equal(nrow(p), 4L)
+      expect_true(all(is.na(p[2:3, ])))
+      expect_true(all(is.finite(p[c(1L, 4L), ])))
+      expect_identical(unname(attr(p, "incomplete")), c(FALSE, TRUE, TRUE, FALSE))
+
+      # Complete rows are unaffected by the presence of incomplete ones.
+      p_ok <- predict(fit, newdata = nd_ok)
+      expect_equal(unclass(p[c(1L, 4L), ]), unclass(p_ok)[, ], ignore_attr = TRUE)
+
+      # An NA in a factor is a missing value, not an unsupported level.
+      expect_false(any(attr(p, "unsupported_stage1")))
+
+      expect_warning(cls <- predict(fit, newdata = nd, type = "class"), "missing predictor values")
+      expect_true(all(is.na(cls[2:3])))
+      expect_false(anyNA(cls[c(1L, 4L)]))
+    }
+  }
+})
