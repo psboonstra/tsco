@@ -165,6 +165,11 @@ test_that("mixed-backend LRT matches independent manual refits", {
     family = VGAM::multinomial(refLevel = 1)
   )
 
+  # Deliberately uses the backends' *native* log-likelihoods. For
+  # individual-level data those coincide with the package's constant-free
+  # scale (every row is one draw, so the multinomial constants are zero), and
+  # this test is the independent check that they do. The grouped analogue
+  # below covers the case where the two scales differ.
   ll_full <- as.numeric(stats::logLik(fit$fit_stage1)) +
     as.numeric(stats::logLik(fit$fit_stage2))
   ll_reduced <- as.numeric(stats::logLik(fit1_reduced)) +
@@ -183,4 +188,83 @@ test_that("mixed-backend LRT matches independent manual refits", {
     tolerance = 1e-8
   )
   expect_equal(joint_tests[term, "df"], df_manual)
+})
+
+
+test_that("grouped LRT matches manual refits scored on the constant-free scale", {
+  skip_if_not_installed("VGAM")
+
+  dat <- make_wine_test_data()
+
+  fit <- tsco(
+    dat$grouped_formula,
+    data = dat$grouped,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
+    stage1 = "po",
+    stage2 = "multinomial",
+    warn_degenerate = FALSE
+  )
+
+  expect_identical(fit$stage1_engine, "vglm")
+  expect_identical(fit$stage2_engine, "vglm")
+
+  term <- "contact"
+  f1_reduced <- stats::update(fit$stage1_formula, paste(". ~ . -", term))
+  f2_reduced <- stats::update(fit$stage2_formula, paste(". ~ . -", term))
+
+  fit1_reduced <- VGAM::vglm(
+    f1_reduced,
+    data = fit$data_stage1,
+    family = VGAM::cumulative(link = "logitlink", parallel = TRUE, reverse = FALSE)
+  )
+  fit2_reduced <- VGAM::vglm(
+    f2_reduced,
+    data = fit$data_stage2,
+    family = VGAM::multinomial(refLevel = 1)
+  )
+
+  # Grouped vglm log-likelihoods carry the multinomial constants, so they are
+  # not comparable with `fit$logLik_stage*`; score the reduced fits the way the
+  # package does, against the stored weighted counts.
+  p1 <- .tsco_align_prob(
+    VGAM::predictvglm(fit1_reduced, newdata = fit$data_stage1, type = "response"),
+    .tsco_stage_levels(fit, 1L)
+  )
+  p2 <- .tsco_align_prob(
+    VGAM::predictvglm(fit2_reduced, newdata = fit$data_stage2, type = "response"),
+    .tsco_stage_levels(fit, 2L)
+  )
+
+  ll_reduced <- .tsco_count_loglik(fit$counts_stage1, p1) +
+    .tsco_count_loglik(fit$counts_stage2, p2)
+
+  lrt_manual <- 2 * (fit$logLik_stage1 + fit$logLik_stage2 - ll_reduced)
+
+  # The native constants differ from the constant-free scale by a fixed
+  # amount, so a naive native-scale statistic still agrees here (both fits
+  # share the counts) -- but the *level* of the log-likelihood does not.
+  expect_false(isTRUE(all.equal(
+    as.numeric(fit1_reduced@criterion["loglikelihood"]),
+    .tsco_count_loglik(fit$counts_stage1, p1),
+    tolerance = 1e-3
+  )))
+
+  joint_tests <- summary(fit, joint_test = "LRT")$joint_tests
+
+  expect_equal(joint_tests[term, "Chisq"], lrt_manual, tolerance = 1e-8)
+
+  # And the same statistic as the individual-level representation.
+  fit_ind <- tsco(
+    dat$individual_formula,
+    data = dat$individual,
+    levels = dat$levels,
+    cutoff_level = dat$cutoff_level,
+    stage1 = "po",
+    stage2 = "multinomial",
+    warn_degenerate = FALSE
+  )
+  joint_ind <- summary(fit_ind, joint_test = "LRT")$joint_tests
+
+  expect_equal(joint_tests[term, "Chisq"], joint_ind[term, "Chisq"], tolerance = 1e-6)
 })

@@ -159,6 +159,7 @@
 #' @param reported_names A character vector of reported names, named by the
 #'   backend's coefficient names, as returned by
 #'   `.tsco_stage_reported_names()`.
+#' @noRd
 .tsco_apply_reported_names <- function(coef_names, reported_names) {
   if (is.null(reported_names) || is.null(names(reported_names))) {
     return(coef_names)
@@ -189,6 +190,7 @@
 #' @param reported_names Optional character vector of reported coefficient
 #'   names, named by the backend's own coefficient names, as returned by
 #'   `.tsco_stage_reported_names()`.
+#' @noRd
 .tsco_coef_table <- function(
     fit,
     kind,
@@ -317,6 +319,7 @@
 #' @return A named numeric vector of +1/-1, same length and names as
 #'   stats::coef(fit).
 #' @param engine The stage fitting backend, either "orm" or "vglm".
+#' @noRd
 .tsco_sign_vector <- function(
     fit,
     kind,
@@ -451,6 +454,21 @@
 
 .tsco_is_intercept_name <- function(x) {
   x == "(Intercept)"
+}
+
+#' Identify threshold or intercept rows among *reported* coefficient names.
+#'
+#' Reported PO thresholds are `Y<=k` or `Y<C`; reported multinomial intercepts
+#' keep VGAM's `(Intercept):k`. Slope names come from design-matrix columns
+#' and never take either form. An optional `stage1:`/`stage2:` prefix from
+#' `coef.tsco()` is tolerated.
+#'
+#' @param x Character vector of reported coefficient names.
+#' @return Logical vector.
+#' @noRd
+.tsco_is_threshold_name <- function(x) {
+  x <- sub("^stage[12]:", "", x)
+  grepl("^Y<", x) | grepl("^\\(Intercept\\)", x)
 }
 
 .tsco_wald_stat <- function(b, V) {
@@ -684,6 +702,7 @@
 #' `rms::orm()` gained a `weights` argument only in later releases. Feature
 #' detection keeps `tsco()` working across `rms` versions instead of failing
 #' inside the fitter with an "unused argument" error.
+#' @noRd
 .tsco_orm_supports_weights <- function() {
   if (!requireNamespace("rms", quietly = TRUE)) {
     return(FALSE)
@@ -710,6 +729,7 @@
 #' @param max_abs_coef,max_se Thresholds above which a coefficient is treated
 #'   as separated.
 #' @return A list with `converged`, `separated`, and `messages`.
+#' @noRd
 .tsco_stage_diagnostics <- function(
     fit,
     engine,
@@ -746,12 +766,22 @@
       is.matrix(coef_table) &&
       all(c("Estimate", "Std. Error") %in% colnames(coef_table))) {
 
+    # The heuristic is applied to slope rows only. Threshold rows are
+    # excluded because `rms::vcov.orm()` may legitimately omit their
+    # covariance entries, which `.tsco_stage_coef_table()` pads with `NA`; a
+    # nonfinite threshold standard error is therefore not evidence of
+    # separation, whereas a nonfinite slope standard error is.
+    is_slope <- !.tsco_is_threshold_name(rownames(coef_table))
+
     b <- coef_table[, "Estimate"]
     se <- coef_table[, "Std. Error"]
 
     flagged <- which(
-      (!is.finite(b)) |
-        (is.finite(b) & is.finite(se) & abs(b) > max_abs_coef & se > max_se)
+      is_slope & (
+        !is.finite(b) |
+          !is.finite(se) |
+          (abs(b) > max_abs_coef & se > max_se)
+      )
     )
 
     if (length(flagged) > 0L) {
@@ -761,8 +791,8 @@
         paste0(
           "coefficient(s) ",
           paste(rownames(coef_table)[flagged], collapse = ", "),
-          " have extreme estimates and standard errors, which usually ",
-          "indicates complete or quasi-complete separation"
+          " have extreme or nonfinite estimates and standard errors, a ",
+          "heuristic signature of complete or quasi-complete separation"
         )
       )
     }
@@ -787,6 +817,7 @@
 #'
 #' @param tt A terms object for the user's original formula.
 #' @return A character vector of term labels for the stage formulas.
+#' @noRd
 .tsco_stage_rhs_labels <- function(tt) {
   term_labels <- attr(tt, "term.labels")
   fac <- attr(tt, "factors")
@@ -988,6 +1019,7 @@
 #' @param fit A fitted stage model.
 #' @param fun A call or name to record as the fitted call's function.
 #' @param family A replacement expression for the recorded `family` argument.
+#' @noRd
 .tsco_trim_fit_call <- function(fit, fun = NULL, family = NULL) {
   trim <- function(cl) {
     if (!is.call(cl)) {
@@ -1156,6 +1188,7 @@
 #'
 #' @param totals Weighted category totals for the stage response.
 #' @return A list with `loglik` and `df`.
+#' @noRd
 .tsco_null_stage_fit_stats <- function(totals) {
   totals <- as.numeric(totals)
 
@@ -1471,6 +1504,41 @@
   nd
 }
 
+#' Rows of prediction data with a factor level absent from the fitted data.
+#'
+#' `.tsco_prepare_newdata()` rejects such levels in user-supplied `newdata`,
+#' so this only bites for `predict(fit)` without `newdata`, where
+#' `predict_data` still holds rows that were removed before fitting because
+#' their weight was exactly zero. Neither stage carries information about a
+#' level that occurs only in those rows, so nothing about them is
+#' identifiable and `predict()` returns `NA` for the whole row.
+#'
+#' @param object A fitted `tsco` object.
+#' @param newdata Prepared prediction data.
+#' @return A logical vector, `TRUE` for rows that cannot be predicted.
+#' @noRd
+.tsco_unfitted_rows <- function(object, newdata) {
+  observed <- object$predictor_observed_levels
+  n <- nrow(newdata)
+
+  if (is.null(observed) || length(observed) == 0L) {
+    return(rep(FALSE, n))
+  }
+
+  out <- rep(FALSE, n)
+
+  for (nm in names(observed)) {
+    if (!nm %in% names(newdata)) {
+      next
+    }
+
+    vals <- as.character(newdata[[nm]])
+    out <- out | (!is.na(vals) & !(vals %in% observed[[nm]]))
+  }
+
+  out
+}
+
 .tsco_stage1_unsupported_rows <- function(object, newdata) {
   if (is.null(object$stage1_factor_levels) ||
       length(object$stage1_factor_levels) == 0L) {
@@ -1508,6 +1576,7 @@
 #'
 #' @param object A fitted `tsco` object.
 #' @return A named probability vector over `object$lower_levels`.
+#' @noRd
 .tsco_empirical_lower_probs <- function(object) {
   totals <- object$totals_stage1
 
@@ -1548,6 +1617,7 @@
 #'
 #' @param formula The stage formula.
 #' @param data The stage fitting data.
+#' @noRd
 .tsco_stage_design_names <- function(formula, data) {
   if (is.null(formula) || is.null(data)) {
     return(NULL)
@@ -1581,6 +1651,7 @@
 #' @param collapsed_label,cutoff_level The stage-2 collapsed level's internal
 #'   label and the cutoff level it stands for, so that its threshold can be
 #'   reported as `Y<C`. Optional.
+#' @noRd
 .tsco_po_reported_coef_names <- function(
     coef_names,
     response_levels,
@@ -1637,6 +1708,7 @@
 #'   design-matrix column names for PO slopes. Optional.
 #' @param collapsed_label,cutoff_level The stage-2 collapsed level's internal
 #'   label and the cutoff level it stands for. Optional.
+#' @noRd
 .tsco_stage_reported_names <- function(
     fit,
     kind,
@@ -1773,6 +1845,7 @@
 #'
 #' @param y A stage response: a factor, or a matrix of category counts.
 #' @param levels The stage's declared levels, in order.
+#' @noRd
 .tsco_observed_levels <- function(y, levels) {
   if (is.matrix(y) || is.data.frame(y)) {
     totals <- colSums(as.matrix(y))
@@ -1794,6 +1867,7 @@
 #'
 #' @param p Probability matrix over `observed`, in that column order.
 #' @param observed,declared Character vectors of level labels.
+#' @noRd
 .tsco_expand_prob <- function(p, observed, declared) {
   p <- as.matrix(p)
 
@@ -1824,6 +1898,7 @@
 #' @param stage_label Text naming the stage, used in messages.
 #' @return A list with the reduced `y`, the `observed` levels, and the
 #'   `dropped` ones.
+#' @noRd
 .tsco_drop_unobserved_levels <- function(y, levels, stage_label) {
   observed <- .tsco_observed_levels(y, levels)
   dropped <- setdiff(levels, observed)
@@ -1871,6 +1946,7 @@
 #'
 #' @param object A "tsco" object.
 #' @param stage 1 or 2.
+#' @noRd
 .tsco_stage_levels <- function(object, stage) {
   declared <- if (stage == 1L) object$lower_levels else object$collapsed_levels
   observed <- if (stage == 1L) {

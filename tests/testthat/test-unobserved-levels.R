@@ -132,8 +132,12 @@ test_that("a grouped response with an all-zero column is handled the same way", 
     check.names = FALSE
   )
 
-  expect_warning(
-    fit <- suppressWarnings(tsco(
+  # Capture every warning, then assert on the package's own message. VGAM
+  # warns about convergence at a half-step on this sparse table; backend
+  # warnings are tolerated, but nothing else from the package may appear.
+  warnings_seen <- character()
+  fit <- withCallingHandlers(
+    tsco(
       cbind(`0`, `1`, `2`, `3`, `4`, `5`) ~ A,
       data = grouped,
       levels = all_levels,
@@ -141,9 +145,20 @@ test_that("a grouped response with an all-zero column is handled the same way", 
       stage1 = "po",
       stage2 = "po",
       warn_degenerate = FALSE
-    )),
-    regexp = NA
-  ) |> suppressWarnings()
+    ),
+    warning = function(w) {
+      warnings_seen <<- c(warnings_seen, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  is_ours <- grepl("declared in `levels` but have no observations", warnings_seen, fixed = TRUE)
+  expect_equal(sum(is_ours), 1L)
+  expect_match(warnings_seen[is_ours], "4", fixed = TRUE)
+
+  others <- warnings_seen[!is_ours]
+  backend <- grepl("half-step|convergence|iteration|checkwz", others)
+  expect_length(others[!backend], 0L)
 
   expect_identical(fit$unobserved_levels, "4")
 

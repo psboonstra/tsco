@@ -4,8 +4,9 @@ Version: 0.0.0.9000
 Authors@R: 
     person(given = "Philip S.", family = "Boonstra", email = "phil@umich.edu", role = c("aut", "cre"))
 Description: Implements two-stage conditional odds (TSCO) models for
-    ordinal outcomes. Individual-level proportional-odds stages use rms and
-    multinomial or grouped-count stages use VGAM.
+    ordinal outcomes. By default, individual-level proportional-odds stages
+    are fitted using 'rms', while multinomial and grouped-count stages are
+    fitted using 'VGAM'.
 License: GPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)

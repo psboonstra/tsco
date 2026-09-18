@@ -77,14 +77,23 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
   aic1 <- if (is.finite(ll1) && is.finite(df1)) -2 * ll1 + 2 * df1 else NA_real_
   aic2 <- if (is.finite(ll2) && is.finite(df2)) -2 * ll2 + 2 * df2 else NA_real_
 
+  # BIC uses the frequency-weighted sample sizes, which equal the unweighted
+  # ones when no weights were supplied. See `?tsco`, argument `weights`.
+  n_w <- if (is.null(object$n_weighted)) object$n_obs else object$n_weighted
+  n1_w <- if (is.null(object$n_stage1_weighted)) {
+    object$n_stage1_obs
+  } else {
+    object$n_stage1_weighted
+  }
+
   bic1 <- if (is.finite(ll1) && is.finite(df1)) {
-    -2 * ll1 + log(object$n_stage1_obs) * df1
+    -2 * ll1 + log(n1_w) * df1
   } else {
     NA_real_
   }
 
   bic2 <- if (is.finite(ll2) && is.finite(df2)) {
-    -2 * ll2 + log(object$n_obs) * df2
+    -2 * ll2 + log(n_w) * df2
   } else {
     NA_real_
   }
@@ -102,6 +111,7 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
              paste(object$upper_levels, collapse = ", "), "}")
     ),
     n_obs = c(object$n_stage1_obs, object$n_obs),
+    n_weighted = c(n1_w, n_w),
     n_groups = c(object$n_stage1_groups, object$n_groups),
     df = c(df1, df2),
     logLik = c(ll1, ll2),
@@ -120,7 +130,7 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
   }
 
   total_BIC <- if (is.finite(total_logLik) && is.finite(total_df)) {
-    -2 * total_logLik + log(object$n_obs) * total_df
+    -2 * total_logLik + log(n_w) * total_df
   } else {
     NA_real_
   }
@@ -148,9 +158,13 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
     n_stage1 = object$n_stage1_obs,
     n_stage1_obs = object$n_stage1_obs,
     n_stage1_groups = object$n_stage1_groups,
+    weighted = isTRUE(object$weighted),
+    n_weighted = n_w,
+    n_stage1_weighted = n1_w,
     component_fit = component_fit,
     total_fit = data.frame(
       n_obs = object$n_obs,
+      n_weighted = n_w,
       df = total_df,
       logLik = total_logLik,
       AIC = total_AIC,
@@ -234,6 +248,17 @@ print.summary.tsco <- function(
     cat("  N contributing to stage 1: ", x$n_stage1_obs, "\n", sep = "")
   }
 
+  weighted <- isTRUE(x$weighted)
+
+  if (weighted) {
+    cat("  Sum of weights: ", signif(x$n_weighted, digits), "\n", sep = "")
+    cat(
+      "  Sum of weights contributing to stage 1: ",
+      signif(x$n_stage1_weighted, digits), "\n",
+      sep = ""
+    )
+  }
+
   cat("\nComponent fit statistics:\n")
   fit_print <- x$component_fit
 
@@ -241,7 +266,11 @@ print.summary.tsco <- function(
     fit_print$n_groups <- NULL
   }
 
-  numeric_cols <- c("n_obs", "n_groups", "df", "logLik", "AIC", "BIC")
+  if (!weighted && "n_weighted" %in% names(fit_print)) {
+    fit_print$n_weighted <- NULL
+  }
+
+  numeric_cols <- c("n_obs", "n_weighted", "n_groups", "df", "logLik", "AIC", "BIC")
   for (jj in intersect(numeric_cols, names(fit_print))) {
     fit_print[[jj]] <- signif(fit_print[[jj]], digits)
   }
@@ -251,9 +280,19 @@ print.summary.tsco <- function(
     "  component BICs do not sum to the combined BIC below.\n",
     sep = ""
   )
+  if (weighted) {
+    cat(
+      "  BIC uses the frequency-weighted sample size (sum of weights).\n",
+      sep = ""
+    )
+  }
 
   cat("\nCombined fit statistics:\n")
   total_print <- x$total_fit
+
+  if (!weighted && "n_weighted" %in% names(total_print)) {
+    total_print$n_weighted <- NULL
+  }
   for (jj in names(total_print)) {
     if (is.numeric(total_print[[jj]])) {
       total_print[[jj]] <- signif(total_print[[jj]], digits)
@@ -345,6 +384,7 @@ print.summary.tsco <- function(
 #' the convention is stated next to every printed table.
 #'
 #' @param kind "po" or "multinomial".
+#' @noRd
 .tsco_scale_legend <- function(kind) {
   if (identical(kind, "multinomial")) {
     return(paste0(
@@ -364,6 +404,7 @@ print.summary.tsco <- function(
 #' Print convergence and separation diagnostics, when there are any.
 #'
 #' @param diagnostics The `diagnostics` element of a `summary.tsco` object.
+#' @noRd
 .tsco_print_diagnostics <- function(diagnostics) {
   if (is.null(diagnostics)) {
     return(invisible(NULL))

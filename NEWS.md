@@ -1,5 +1,42 @@
 # tsco 0.0.0.9000
 
+- **Breaking:** a formula without an intercept (`y ~ x - 1`, `y ~ 0 + x`) is
+  now an error. The thresholds and multinomial intercepts are the baseline
+  category probabilities and cannot be removed; previously `rms::orm()`
+  ignored the `- 1` but switched to per-level slope names such as
+  `temp=warm`, while `VGAM::vglm()` fitted a different multinomial model. The
+  error message points to `relevel()` for choosing a factor's reference level.
+- `predict(unsupported_stage1 = "uniform")` now splits the lower-partition
+  mass over the lower categories observed in the fitting data. A category
+  declared in `levels` but never observed receives probability zero, as it
+  does under `"empirical"` and everywhere else in the package.
+
+- **Weights are frequency weights, and BIC now says so.** The sample size used
+  by BIC and by `nobs(logLik(fit))` is the weighted count `sum(weights)` (for
+  grouped data, the weighted sum of the count totals), stored as `n_weighted`
+  with the stage-1 analogue `n_stage1_weighted`, so a weighted fit and a fit
+  to the equivalent row-replicated data now give the same BIC. Previously the
+  log-likelihood was weighted but BIC used the unweighted row count. `n_obs`
+  is unchanged. `print()` and `summary()` show the weighted counts only when
+  weights were supplied.
+- **Bug fix:** a row with case weight exactly zero is now removed before
+  fitting. Such rows made `VGAM::vglm()` fail on a 0/0 in its log-likelihood,
+  and would otherwise have counted as observed when deciding which predictor
+  levels, outcome levels and stage-1 factor levels have support. `n_obs`,
+  `n_weighted` and every support set now reflect positive-weight rows only;
+  `n_zero_weight` records how many rows were removed. `predict()` without
+  `newdata` still returns every input row; a row whose factor level occurred
+  only in zero-weight observations is returned as `NA` with a warning, since
+  no stage has information about it.
+- Stage-2 fitting data now drop unused factor levels, as stage 1 already did,
+  so `rms::orm()` no longer reports a zero coefficient with a singularity
+  warning for a level that no observation has.
+- The separation diagnostic now applies only to slope coefficients and also
+  flags a finite estimate whose standard error is not finite. Threshold rows
+  are excluded because `rms::vcov.orm()` may legitimately omit their
+  covariance entries; that is not separation.
+- Internal helpers no longer generate help pages (`@noRd`).
+
 - **Bug fix:** the joint likelihood-ratio test for a single-predictor model
   fitted to a grouped-count (`cbind(...)`) response was badly
   anti-conservative. The full model's log-likelihood was taken from
@@ -63,7 +100,8 @@
   accept case weights in `orm()`; `po_engine = "orm"` errors in that case
   rather than failing inside the fitter.
 - Inline formula transformations such as `log(x)`, `poly(x, 2)` and
-  `rms::rcs(x)` are now supported, along with offsets. Stage right-hand sides
+  `rms::rcs(x)` are now supported. (Offsets are not: `offset()` terms are
+  carried into the stage formulas but fail inside `rms::orm()`.) Stage right-hand sides
   are rebuilt from model-frame column names, and `newdata` given to `predict()`
   may contain either the raw variables or the evaluated columns.
 - `predict()` matches stage probability columns by name across both backends

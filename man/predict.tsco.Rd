@@ -30,9 +30,11 @@ were not represented in the stage-1 fitting data. Options are:
 \code{"partial"}: return \code{NA} for unidentified lower-category probabilities
 but retain identifiable upper-category probabilities;
 \code{"uniform"}: split the stage-2 lower-partition probability equally across
-lower categories;
+the lower categories observed in the fitting data;
 \code{"empirical"}: split the lower-partition probability according to the
-empirical lower-category distribution among stage-1 observations;
+(weighted) empirical lower-category distribution among stage-1
+observations. Under both, a lower category declared in \code{levels} but never
+observed receives probability zero, as it does everywhere else;
 \code{"na"}: return \code{NA} for the entire probability row.}
 
 \item{...}{Must be empty. Backend-specific prediction arguments are not
@@ -72,4 +74,11 @@ data. This check does not detect an unobserved combination of otherwise
 observed factor levels in a model containing interactions such as \code{x1 * x2}.
 Predictions for such combinations may therefore be treated as supported and
 should be regarded as model-based extrapolations.
+
+Observations whose case weight was exactly zero are not used in fitting but
+are still returned by \code{predict()} without \code{newdata}. If such a row carries a
+factor level that occurred in no positive-weight observation, neither stage
+has information about it and every probability for that row is \code{NA}; the
+returned matrix then carries a logical \code{unfitted} attribute marking those
+rows.
 }

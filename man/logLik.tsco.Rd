@@ -20,3 +20,9 @@ individual-level scale. For grouped/count responses, this excludes
 multinomial combinatorial constants so that grouped and ungrouped
 representations of the same data have comparable log-likelihoods.
 }
+\details{
+The \code{nobs} attribute, and therefore \code{\link[=BIC]{BIC()}}, uses the frequency-weighted
+sample size (\code{n_weighted}), so a weighted fit and a fit to the equivalent
+row-replicated data give the same BIC. Without weights this is the number
+of represented observations.
+}

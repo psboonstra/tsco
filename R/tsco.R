@@ -15,11 +15,16 @@
 #' cbind(normal, mild, severe) ~ x.
 #'
 #' @param formula Model formula, e.g. y ~ x1 + x2 for individual-level data or
-#'   cbind(y0, y1, y2) ~ x1 + x2 for grouped count data. Inline
-#'   transformations such as `log(x)` or `poly(x, 2)` are supported: the
-#'   stage-specific right-hand sides are rebuilt from the model-frame columns,
-#'   and `newdata` supplied to [predict.tsco()] may contain either the raw
-#'   variables or the transformed columns.
+#'   cbind(y0, y1, y2) ~ x1 + x2 for grouped count data. Common inline
+#'   transformations, including `log(x)`, `poly(x, 2)` and `scale(x)`, and
+#'   interactions are supported: the stage-specific right-hand sides are
+#'   rebuilt from the model-frame columns, the fitted constants of
+#'   data-dependent bases are stored, and `newdata` supplied to
+#'   [predict.tsco()] may contain either the raw variables or the transformed
+#'   columns. Offsets are not supported. The formula must keep its intercept:
+#'   the thresholds and multinomial intercepts are the baseline category
+#'   probabilities, so `- 1` is an error; choose a factor's reference level
+#'   with `relevel()` instead.
 #' @param data A data.frame.
 #' @param cutoff_level The first outcome level in the upper partition, supplied
 #'   as a level label.
@@ -48,10 +53,22 @@
 #' @param stage2_args Named list of additional arguments passed only to the
 #'   selected stage-2 fitter, with the same restrictions and likelihood-ratio
 #'   refit behavior as `stage1_args`.
-#' @param weights Optional finite, nonnegative multiplicative case weights with
-#'   at least one positive value. For grouped responses, a weight multiplies the
+#' @param weights Optional finite, nonnegative frequency weights with at least
+#'   one positive value. For grouped responses, a weight multiplies the
 #'   complete count contribution from that covariate pattern. Integer weights
-#'   reproduce a fit to the row-replicated data. Under `po_engine = "auto"` a
+#'   reproduce a fit to the row-replicated data, including its log-likelihood,
+#'   and the sample size used by BIC and [nobs()] is the weighted count
+#'   `sum(weights)` (for grouped data, the weighted sum of the count totals),
+#'   reported as `n_weighted`; `n_obs` continues to count represented
+#'   observations without weights. For non-integer analytic or survey weights
+#'   this is a convention rather than an effective sample size, and BIC should
+#'   be interpreted accordingly. A row whose weight is exactly zero
+#'   contributes nothing to the likelihood and is removed before fitting, so
+#'   it does not count towards `n_obs`, does not establish an observed
+#'   predictor or outcome level, and cannot make a factor level supported in
+#'   stage 1; the number of such rows is stored as `n_zero_weight`.
+#'   `predict()` without `newdata` still returns every input row. Under
+#'   `po_engine = "auto"` a
 #'   weighted individual-level PO stage uses [rms::orm()] when the installed
 #'   `rms` accepts case weights and falls back to [VGAM::vglm()] when it does
 #'   not, so a weighted and an unweighted fit of the same model may not use the
@@ -75,7 +92,17 @@
 #' diagnostic when a stage shows the usual symptoms, but the package does not
 #' correct separation.
 #'
-#' @return An object of class "tsco".
+#' @return An object of class "tsco". Among its components, `fit_stage1` and
+#'   `fit_stage2` are the fitted stage models, `logLik_stage1`,
+#'   `logLik_stage2` and `logLik` are constant-free log-likelihoods on the
+#'   individual-level scale, `n_obs` and `n_weighted` are the unweighted and
+#'   frequency-weighted sample sizes, and `data_stage1`, `data_stage2`,
+#'   `stage1_formula` and `stage2_formula` are the stage fitting data and
+#'   formulas. The calls recorded inside `fit_stage1` and `fit_stage2` are
+#'   compacted to save memory, with the data, weights and family replaced by
+#'   placeholders, and are not intended for re-evaluation: `update()` or
+#'   similar on a stage fit will fail. Refit through `tsco()`, or use the
+#'   stored stage data and formulas directly.
 #' @export
 tsco <- function(
     formula,
@@ -126,6 +153,24 @@ tsco <- function(
   # data frames containing only predictors plus a new internal response.
   tt <- stats::terms(formula, data = data)
   response_col <- attr(tt, "response")
+
+  # A TSCO model always has an intercept: the proportional-odds thresholds and
+  # the multinomial intercepts *are* the baseline category probabilities.
+  # `- 1` cannot remove them, and the two backends disagreed about what to do
+  # instead -- `rms::orm()` ignored it but switched the slopes to one-indicator
+  # per-level names such as `temp=warm`, breaking engine-independent naming,
+  # while `VGAM::vglm()` fitted a genuinely different multinomial model.
+  if (identical(as.integer(attr(tt, "intercept")), 0L)) {
+    stop(
+      "`formula` must include an intercept; remove `- 1` or `+ 0`. ",
+      "The proportional-odds thresholds and multinomial intercepts are the ",
+      "baseline category probabilities and cannot be dropped. If the aim is ",
+      "one coefficient per level of a factor, keep the intercept and choose ",
+      "the reference level with `relevel()` (or `factor(x, levels = ...)`) ",
+      "on the predictor before calling `tsco()`.",
+      call. = FALSE
+    )
+  }
 
   if (is.null(response_col) || response_col < 1L) {
     stop("Could not identify the response in `formula`.", call. = FALSE)
@@ -381,6 +426,39 @@ tsco <- function(
     w_all <- NULL
   }
 
+  # A row with weight exactly zero contributes nothing to either likelihood,
+  # so it must not establish support: not for predictor levels, not for
+  # outcome levels, and not for the grouped `has_lower` screen. Dropping such
+  # rows here, once, makes every downstream count and level set right by
+  # construction. Backends do not handle these rows themselves: VGAM fails on
+  # a 0/0 in its log-likelihood. `predict_data` keeps every input row so
+  # `predict(fit)` still returns them. Rows with small positive weights are
+  # left alone; a tiny weight is the user's stated intent.
+  n_zero_weight <- 0L
+
+  if (!is.null(w_all) && any(w_all == 0)) {
+    keep <- w_all > 0
+    n_zero_weight <- sum(!keep)
+
+    mf <- mf[keep, , drop = FALSE]
+    cov_mf <- cov_mf[keep, , drop = FALSE]
+    w_all <- w_all[keep]
+
+    if (is_grouped) {
+      y_mat <- y_mat[keep, , drop = FALSE]
+    } else {
+      y_chr <- y_chr[keep]
+    }
+
+    predictor_observed_levels <- lapply(
+      cov_mf[factor_predictors],
+      function(z) {
+        lev <- levels(z)
+        lev[lev %in% as.character(z)]
+      }
+    )
+  }
+
   # Internal helper: construct a stage formula with a new response.
   #
   # The right-hand side is rebuilt from the model-frame column names rather
@@ -395,10 +473,6 @@ tsco <- function(
       "1"
     } else {
       paste(rhs_labels, collapse = " + ")
-    }
-
-    if (identical(as.integer(attr(tt, "intercept")), 0L)) {
-      rhs <- paste(rhs, "- 1")
     }
 
     stats::as.formula(
@@ -506,11 +580,19 @@ tsco <- function(
     w2 <- w_all
   }
 
-  # Remove stage-1 factor levels with no contributing observations. Retaining
-  # their all-zero design columns can make orm fits singular. Full-data factor
-  # metadata remain stored separately for prediction support checks.
+  # Remove factor levels with no contributing observations from each stage's
+  # fitting data. Retaining their all-zero design columns makes orm fits
+  # singular (a zero coefficient with a singularity warning) while VGAM drops
+  # them silently, so the two engines would report different coefficient sets.
+  # Stage 2 acquires such levels when they occur only in zero-weight rows or
+  # are declared but never observed. Full-data factor metadata remain stored
+  # separately for prediction support checks.
   for (nm in intersect(factor_predictors, names(d1))) {
     d1[[nm]] <- droplevels(d1[[nm]])
+  }
+
+  for (nm in intersect(factor_predictors, names(d2))) {
+    d2[[nm]] <- droplevels(d2[[nm]])
   }
 
   if (!is.null(w1) && !any(w1 > 0)) {
@@ -650,6 +732,17 @@ tsco <- function(
   logLik_stage2 <- .tsco_count_loglik(y2_counts_ll, p2_hat)
   logLik_total <- logLik_stage1 + logLik_stage2
 
+  # Weighted sample sizes. Weights are frequency weights: an integer weight
+  # reproduces the row-replicated fit, whose sample size is the sum of the
+  # weights (times the row's count total for grouped data). The
+  # log-likelihood is on that replicated scale, so BIC and `nobs()` use these
+  # rather than the number of rows or unweighted counts; with no weights the
+  # two coincide. For arbitrary analytic or survey weights this is a
+  # convention, not a theorem.
+  weighted <- !is.null(w_all)
+  n_weighted <- sum(y2_counts_ll)
+  n_stage1_weighted <- sum(y1_counts_ll)
+
   out <- list(
     call = match.call(),
     formula = formula,
@@ -705,13 +798,19 @@ tsco <- function(
     predictor_observed_levels = predictor_observed_levels,
     stage1_factor_levels = stage1_factor_levels,
 
-    # sample-size accounting
+    # sample-size accounting. `n_obs` counts represented observations without
+    # weights; `n_weighted` is the frequency-weighted count that BIC and
+    # `nobs()` use.
     n = n_obs,
     n_obs = n_obs,
     n_groups = n_groups,
     n_stage1 = n_stage1_obs,
     n_stage1_obs = n_stage1_obs,
     n_stage1_groups = n_stage1_groups,
+    weighted = weighted,
+    n_weighted = n_weighted,
+    n_stage1_weighted = n_stage1_weighted,
+    n_zero_weight = n_zero_weight,
     logLik_stage1 = logLik_stage1,
     logLik_stage2 = logLik_stage2,
     logLik = logLik_total

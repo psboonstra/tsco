@@ -43,6 +43,15 @@ print.tsco <- function(x, ...) {
     cat("N contributing to stage 1: ", x$n_stage1_obs, "\n", sep = "")
   }
 
+  if (isTRUE(x$weighted)) {
+    cat("Sum of weights: ", signif(x$n_weighted, 7), "\n", sep = "")
+    cat(
+      "Sum of weights contributing to stage 1: ",
+      signif(x$n_stage1_weighted, 7), "\n",
+      sep = ""
+    )
+  }
+
   cat("\nUse summary() for coefficient tables.\n")
 
   invisible(x)

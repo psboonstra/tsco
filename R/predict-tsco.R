@@ -26,6 +26,13 @@
 #' Predictions for such combinations may therefore be treated as supported and
 #' should be regarded as model-based extrapolations.
 #'
+#' Observations whose case weight was exactly zero are not used in fitting but
+#' are still returned by `predict()` without `newdata`. If such a row carries a
+#' factor level that occurred in no positive-weight observation, neither stage
+#' has information about it and every probability for that row is `NA`; the
+#' returned matrix then carries a logical `unfitted` attribute marking those
+#' rows.
+#'
 #' @param object An object of class `"tsco"`.
 #' @param newdata Optional data frame containing predictor values at which to
 #'   predict. If omitted, predictions are returned for the original observations
@@ -40,9 +47,11 @@
 #'   `"partial"`: return `NA` for unidentified lower-category probabilities
 #'   but retain identifiable upper-category probabilities;
 #'   `"uniform"`: split the stage-2 lower-partition probability equally across
-#'   lower categories;
+#'   the lower categories observed in the fitting data;
 #'   `"empirical"`: split the lower-partition probability according to the
-#'   empirical lower-category distribution among stage-1 observations;
+#'   (weighted) empirical lower-category distribution among stage-1
+#'   observations. Under both, a lower category declared in `levels` but never
+#'   observed receives probability zero, as it does everywhere else;
 #'   `"na"`: return `NA` for the entire probability row.
 #' @param ... Must be empty. Backend-specific prediction arguments are not
 #'   supported because a TSCO model can use different engines across stages.
@@ -79,8 +88,25 @@ predict.tsco <- function(
 
   pred_data <- .tsco_prepare_newdata(object, newdata)
 
-  unsupported <- .tsco_stage1_unsupported_rows(object, pred_data)
-  supported <- !unsupported
+  # Rows carrying a factor level that no positive-weight observation had. Only
+  # reachable through `predict(fit)` without `newdata`, for rows dropped at
+  # fitting time because their weight was exactly zero. Neither stage can say
+  # anything about them, so they are returned as all-NA rows.
+  unfitted <- .tsco_unfitted_rows(object, pred_data)
+  fitted_rows <- !unfitted
+
+  if (any(unfitted)) {
+    warning(
+      sum(unfitted), " prediction row(s) contain a factor level that ",
+      "occurred only in observations with zero weight. No stage carries ",
+      "information about such a level, so all probabilities for these rows ",
+      "are returned as NA.",
+      call. = FALSE
+    )
+  }
+
+  unsupported <- .tsco_stage1_unsupported_rows(object, pred_data) & fitted_rows
+  supported <- !unsupported & fitted_rows
 
   if (any(unsupported)) {
     msg <- switch(
@@ -126,27 +152,38 @@ predict.tsco <- function(
   }
 
   # --------------------------------------------------------------------------
-  # Stage 2 predictions: available for all rows.
+  # Stage 2 predictions: available for every row the fit has information on.
   # --------------------------------------------------------------------------
-
-  p2 <- predict_stage_prob(
-    object$fit_stage2,
-    engine = object$stage2_engine,
-    pred_data = pred_data,
-    levels = .tsco_stage_levels(object, 2L)
-  )
-  p2 <- .tsco_align_prob(p2, .tsco_stage_levels(object, 2L))
-  p2 <- .tsco_expand_prob(
-    p2, .tsco_stage_levels(object, 2L), object$collapsed_levels
-  )
 
   n <- nrow(pred_data)
 
-  if (nrow(p2) != n) {
-    stop(
-      "Stage 2 prediction returned an unexpected number of rows.",
-      call. = FALSE
+  p2 <- matrix(
+    NA_real_,
+    nrow = n,
+    ncol = length(object$collapsed_levels),
+    dimnames = list(rownames(pred_data), object$collapsed_levels)
+  )
+
+  if (any(fitted_rows)) {
+    p2_fitted <- predict_stage_prob(
+      object$fit_stage2,
+      engine = object$stage2_engine,
+      pred_data = pred_data[fitted_rows, , drop = FALSE],
+      levels = .tsco_stage_levels(object, 2L)
     )
+    p2_fitted <- .tsco_align_prob(p2_fitted, .tsco_stage_levels(object, 2L))
+    p2_fitted <- .tsco_expand_prob(
+      p2_fitted, .tsco_stage_levels(object, 2L), object$collapsed_levels
+    )
+
+    if (nrow(p2_fitted) != sum(fitted_rows)) {
+      stop(
+        "Stage 2 prediction returned an unexpected number of rows.",
+        call. = FALSE
+      )
+    }
+
+    p2[fitted_rows, ] <- p2_fitted
   }
 
   lower_mass <- as.numeric(p2[, object$lower_collapsed_label])
@@ -195,10 +232,18 @@ predict.tsco <- function(
   # lower-partition probabilities.
   if (any(unsupported)) {
     if (unsupported_stage1 == "uniform") {
+      # Split over the lower levels the fit actually observed. A declared but
+      # unobserved level has fitted probability zero everywhere else in the
+      # package and must not receive mass here either.
+      observed_lower <- intersect(.tsco_stage_levels(object, 1L), object$lower_levels)
+      uniform <- stats::setNames(numeric(length(object$lower_levels)), object$lower_levels)
+      uniform[observed_lower] <- 1 / length(observed_lower)
+
       p1[unsupported, ] <- matrix(
-        1 / length(object$lower_levels),
+        rep(uniform, each = sum(unsupported)),
         nrow = sum(unsupported),
         ncol = length(object$lower_levels),
+        byrow = FALSE,
         dimnames = list(
           rownames(pred_data)[unsupported],
           object$lower_levels
@@ -286,6 +331,10 @@ predict.tsco <- function(
   attr(prob, "unsupported_stage1") <- unsupported
   attr(prob, "unsupported_stage1_method") <- unsupported_stage1
   attr(prob, "lower_mass") <- lower_mass
+
+  if (any(unfitted)) {
+    attr(prob, "unfitted") <- unfitted
+  }
 
   # --------------------------------------------------------------------------
   # Return requested output type.

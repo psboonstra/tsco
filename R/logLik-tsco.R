@@ -5,6 +5,11 @@
 #' multinomial combinatorial constants so that grouped and ungrouped
 #' representations of the same data have comparable log-likelihoods.
 #'
+#' The `nobs` attribute, and therefore [BIC()], uses the frequency-weighted
+#' sample size (`n_weighted`), so a weighted fit and a fit to the equivalent
+#' row-replicated data give the same BIC. Without weights this is the number
+#' of represented observations.
+#'
 #' @param object An object of class `"tsco"`.
 #' @param ... Ignored.
 #'
@@ -21,7 +26,9 @@ logLik.tsco <- function(object, ...) {
 
   df <- .tsco_df(object$fit_stage1) + .tsco_df(object$fit_stage2)
 
-  nobs <- if (!is.null(object$n_obs)) {
+  nobs <- if (!is.null(object$n_weighted)) {
+    object$n_weighted
+  } else if (!is.null(object$n_obs)) {
     object$n_obs
   } else {
     object$n

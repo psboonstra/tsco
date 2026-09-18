@@ -21,11 +21,16 @@ tsco(
 }
 \arguments{
 \item{formula}{Model formula, e.g. y ~ x1 + x2 for individual-level data or
-cbind(y0, y1, y2) ~ x1 + x2 for grouped count data. Inline
-transformations such as \code{log(x)} or \code{poly(x, 2)} are supported: the
-stage-specific right-hand sides are rebuilt from the model-frame columns,
-and \code{newdata} supplied to \code{\link[=predict.tsco]{predict.tsco()}} may contain either the raw
-variables or the transformed columns.}
+cbind(y0, y1, y2) ~ x1 + x2 for grouped count data. Common inline
+transformations, including \code{log(x)}, \code{poly(x, 2)} and \code{scale(x)}, and
+interactions are supported: the stage-specific right-hand sides are
+rebuilt from the model-frame columns, the fitted constants of
+data-dependent bases are stored, and \code{newdata} supplied to
+\code{\link[=predict.tsco]{predict.tsco()}} may contain either the raw variables or the transformed
+columns. Offsets are not supported. The formula must keep its intercept:
+the thresholds and multinomial intercepts are the baseline category
+probabilities, so \code{- 1} is an error; choose a factor's reference level
+with \code{relevel()} instead.}
 
 \item{data}{A data.frame.}
 
@@ -63,10 +68,22 @@ prevent those tests from being calculated.}
 selected stage-2 fitter, with the same restrictions and likelihood-ratio
 refit behavior as \code{stage1_args}.}
 
-\item{weights}{Optional finite, nonnegative multiplicative case weights with
-at least one positive value. For grouped responses, a weight multiplies the
+\item{weights}{Optional finite, nonnegative frequency weights with at least
+one positive value. For grouped responses, a weight multiplies the
 complete count contribution from that covariate pattern. Integer weights
-reproduce a fit to the row-replicated data. Under \code{po_engine = "auto"} a
+reproduce a fit to the row-replicated data, including its log-likelihood,
+and the sample size used by BIC and \code{\link[=nobs]{nobs()}} is the weighted count
+\code{sum(weights)} (for grouped data, the weighted sum of the count totals),
+reported as \code{n_weighted}; \code{n_obs} continues to count represented
+observations without weights. For non-integer analytic or survey weights
+this is a convention rather than an effective sample size, and BIC should
+be interpreted accordingly. A row whose weight is exactly zero
+contributes nothing to the likelihood and is removed before fitting, so
+it does not count towards \code{n_obs}, does not establish an observed
+predictor or outcome level, and cannot make a factor level supported in
+stage 1; the number of such rows is stored as \code{n_zero_weight}.
+\code{predict()} without \code{newdata} still returns every input row. Under
+\code{po_engine = "auto"} a
 weighted individual-level PO stage uses \code{\link[rms:orm]{rms::orm()}} when the installed
 \code{rms} accepts case weights and falls back to \code{\link[VGAM:vglm]{VGAM::vglm()}} when it does
 not, so a weighted and an unweighted fit of the same model may not use the
@@ -81,7 +98,17 @@ stage fit.}
 regressions.}
 }
 \value{
-An object of class "tsco".
+An object of class "tsco". Among its components, \code{fit_stage1} and
+\code{fit_stage2} are the fitted stage models, \code{logLik_stage1},
+\code{logLik_stage2} and \code{logLik} are constant-free log-likelihoods on the
+individual-level scale, \code{n_obs} and \code{n_weighted} are the unweighted and
+frequency-weighted sample sizes, and \code{data_stage1}, \code{data_stage2},
+\code{stage1_formula} and \code{stage2_formula} are the stage fitting data and
+formulas. The calls recorded inside \code{fit_stage1} and \code{fit_stage2} are
+compacted to save memory, with the data, weights and family replaced by
+placeholders, and are not intended for re-evaluation: \code{update()} or
+similar on a stage fit will fail. Refit through \code{tsco()}, or use the
+stored stage data and formulas directly.
 }
 \description{
 Fits a two-stage conditional odds model for an ordinal outcome. Backend
