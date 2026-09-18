@@ -118,11 +118,16 @@
   b <- b_raw * s
 
   if (is.null(V_raw)) {
+    # Same reported names as the full table, `coef()` and `vcov()`; a fit
+    # whose covariance is unavailable must not fall back to backend names.
     return(
       matrix(
         b,
         ncol = 1L,
-        dimnames = list(names(b), "Estimate")
+        dimnames = list(
+          .tsco_apply_reported_names(names(b), reported_names),
+          "Estimate"
+        )
       )
     )
   }
@@ -840,20 +845,9 @@
     }
   }
 
-  # Offsets are model-frame columns too, and dropping them silently would
-  # change the fitted model, so carry them through explicitly.
-  offset_idx <- attr(tt, "offset")
-
-  if (length(offset_idx) > 0L) {
-    var_names <- vapply(
-      as.list(attr(tt, "variables"))[-1L],
-      .tsco_deparse,
-      character(1L)
-    )
-
-    labels <- c(labels, paste0("offset(`", var_names[offset_idx], "`)"))
-  }
-
+  # Offsets are rejected in `tsco()` before this point, so there is nothing to
+  # carry through. Rebuilding them here would be the only untested route by
+  # which one could reach the fitters.
   labels
 }
 
@@ -964,12 +958,22 @@
       args$weights <- weights
     }
 
-    return(
-      .tsco_trim_fit_call(
-        do.call(rms::orm, c(args, stage_args)),
-        fun = quote(rms::orm)
-      )
+    # `rms::orm()` warns on every weighted fit that weights are ignored by
+    # `rms::validate()` and `rms::bootcov()`. `tsco()` calls neither, and the
+    # caveat is stated in `?tsco` under `weights`, so the note is muffled here
+    # rather than repeated twice per fit and twice per LRT refit. Only that
+    # exact message is silenced; any other warning from the fitter passes.
+    fit <- withCallingHandlers(
+      do.call(rms::orm, c(args, stage_args)),
+      warning = function(w) {
+        if (grepl("weights are ignored in model validation",
+                  conditionMessage(w), fixed = TRUE)) {
+          invokeRestart("muffleWarning")
+        }
+      }
     )
+
+    return(.tsco_trim_fit_call(fit, fun = quote(rms::orm)))
   }
 
   if (!identical(engine, "vglm")) {

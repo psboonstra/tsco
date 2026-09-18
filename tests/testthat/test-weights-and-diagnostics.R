@@ -419,3 +419,148 @@ test_that("uniform completion is uniform over the observed lower levels", {
   expect_equal(unname(p[, c("1", "2", "3")]), c(lm / 2, 0, lm / 2), tolerance = 1e-10)
   expect_equal(unname(rowSums(p)), 1, tolerance = 1e-10)
 })
+
+
+# --- weight alignment after missing-data removal -----------------------------
+
+test_that("weights align with the model frame under custom and misleading row names", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+
+  set.seed(7)
+  w <- sample(1:3, nrow(wine), replace = TRUE)
+  wine$contact[c(3, 40)] <- NA
+  complete <- !is.na(wine$contact)
+
+  reference <- fit_wine(wine[complete, , drop = FALSE], weights = w[complete], po_engine = "vglm")
+
+  # Character row names used to be a hard error.
+  wine_chr <- wine
+  rownames(wine_chr) <- paste0("patient_", seq_len(nrow(wine)))
+  fit_chr <- fit_wine(wine_chr, weights = w, po_engine = "vglm")
+  expect_equal(coef(fit_chr), coef(reference), tolerance = 1e-8)
+  expect_equal(fit_chr$n_weighted, sum(w[complete]))
+
+  # Numeric-looking row names that are not row positions used to select the
+  # wrong weights without any error.
+  wine_num <- wine
+  rownames(wine_num) <- as.character(seq_len(nrow(wine)) + 1000L)
+  fit_num <- fit_wine(wine_num, weights = w, po_engine = "vglm")
+  expect_equal(coef(fit_num), coef(reference), tolerance = 1e-8)
+  expect_equal(fit_num$n_weighted, sum(w[complete]))
+
+  # One weight per complete case is still accepted.
+  fit_cc <- fit_wine(wine, weights = w[complete], po_engine = "vglm")
+  expect_equal(coef(fit_cc), coef(reference), tolerance = 1e-8)
+
+  # Any other length is an error.
+  expect_error(fit_wine(wine, weights = w[-1]), "must equal nrow\\(data\\)")
+})
+
+
+test_that("weights that are positive only on rows removed by na.action are an error", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+
+  w <- rep(0, nrow(wine))
+  w[1:3] <- 1
+  wine$contact[1:3] <- NA
+
+  expect_error(
+    fit_wine(wine, weights = w),
+    "No positive-weight observations remain"
+  )
+})
+
+
+# --- offsets are rejected ------------------------------------------------------
+
+test_that("an offset in the formula is a clear error", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+  wine$os <- seq_len(nrow(wine)) / 100
+
+  expect_error(fit_wine(wine, rhs = "temp + offset(os)"), "Offsets are not supported")
+
+  grouped <- dat$grouped
+  grouped$n_total <- rowSums(grouped[dat$levels])
+
+  expect_error(
+    tsco(
+      update(dat$grouped_formula, . ~ . + offset(log(n_total))),
+      data = grouped,
+      levels = dat$levels,
+      cutoff_level = dat$cutoff_level,
+      stage1 = "po",
+      stage2 = "po",
+      warn_degenerate = FALSE
+    ),
+    "Offsets are not supported"
+  )
+
+  expect_length(.tsco_stage_rhs_labels(stats::terms(y ~ a + b:c)), 2L)
+})
+
+
+# --- coefficient-table fallback keeps reported names --------------------------
+
+test_that("the estimate-only coefficient table uses reported names", {
+  dat <- make_wine_test_data()
+  fit <- fit_wine(dat$individual)
+
+  reported <- .tsco_stage_reported_names(
+    fit$fit_stage1,
+    kind = fit$stage1,
+    engine = fit$stage1_engine,
+    response_levels = .tsco_stage_levels(fit, 1L),
+    formula = fit$stage1_formula,
+    data = fit$data_stage1,
+    collapsed_label = fit$lower_collapsed_label,
+    cutoff_level = fit$cutoff_level
+  )
+
+  full <- .tsco_stage_coef_table(
+    fit$fit_stage1, kind = fit$stage1, engine = fit$stage1_engine,
+    reported_names = reported
+  )
+
+  # Simulate a fit whose covariance cannot be extracted.
+  local_mocked_bindings(.tsco_stage_vcov = function(fit) NULL, .package = "tsco")
+
+  fallback <- .tsco_stage_coef_table(
+    fit$fit_stage1, kind = fit$stage1, engine = fit$stage1_engine,
+    reported_names = reported
+  )
+
+  expect_identical(colnames(fallback), "Estimate")
+  expect_identical(rownames(fallback), rownames(full))
+  expect_equal(fallback[, "Estimate"], full[, "Estimate"])
+  expect_true(any(grepl("^Y<=", rownames(fallback))))
+})
+
+
+# --- rms's weights note is not passed on ------------------------------------
+
+test_that("weighted orm fits do not pass on rms's validate()/bootcov() weights note", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+
+  set.seed(11)
+  w <- sample(1:2, nrow(wine), replace = TRUE)
+
+  seen <- character()
+  fit <- withCallingHandlers(
+    {
+      f <- fit_wine(wine, weights = w)
+      summary(f, joint_test = "LRT")
+      f
+    },
+    warning = function(cnd) {
+      seen <<- c(seen, conditionMessage(cnd))
+      invokeRestart("muffleWarning")
+    }
+  )
+
+  expect_false(any(grepl("weights are ignored in model validation", seen, fixed = TRUE)))
+  expect_true(fit$weighted)
+})

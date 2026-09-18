@@ -160,6 +160,16 @@ tsco <- function(
   # instead -- `rms::orm()` ignored it but switched the slopes to one-indicator
   # per-level names such as `temp=warm`, breaking engine-independent naming,
   # while `VGAM::vglm()` fitted a genuinely different multinomial model.
+  # Offsets are documented as unsupported and must not slip into the stage
+  # fits untested: `rms::orm()` fails on them with an opaque internal error.
+  if (length(attr(tt, "offset")) > 0L) {
+    stop(
+      "Offsets are not supported by `tsco()`; remove the `offset()` term ",
+      "from `formula`.",
+      call. = FALSE
+    )
+  }
+
   if (identical(as.integer(attr(tt, "intercept")), 0L)) {
     stop(
       "`formula` must include an intercept; remove `- 1` or `+ 0`. ",
@@ -406,19 +416,42 @@ tsco <- function(
     if (length(weights) == nrow(mf)) {
       w_all <- weights
     } else if (length(weights) == nrow(data)) {
-      rn <- suppressWarnings(as.integer(rownames(mf)))
+      # Rows removed by `na.action` are recorded as *positions* in the
+      # model frame's "na.action" attribute. Using those, rather than parsing
+      # `rownames(mf)` as integers, keeps alignment right for data frames with
+      # character row names (which used to error) and for numeric-looking row
+      # names that are not row positions (which used to select silently wrong
+      # weights).
+      omitted <- attr(mf, "na.action")
 
-      if (anyNA(rn)) {
+      keep <- if (is.null(omitted)) {
+        seq_len(nrow(data))
+      } else {
+        setdiff(seq_len(nrow(data)), as.integer(omitted))
+      }
+
+      if (length(keep) != nrow(mf)) {
         stop(
-          "Could not align `weights` with model frame. Ensure weight length equals nrow(model.frame).",
+          "Could not align `weights` with the model frame after missing-data ",
+          "handling. Supply one weight per row of `data`, or one per complete ",
+          "case.",
           call. = FALSE
         )
       }
 
-      w_all <- weights[rn]
+      w_all <- weights[keep]
     } else {
       stop(
         "`weights` must equal nrow(data) or the number of complete cases.",
+        call. = FALSE
+      )
+    }
+
+    # The positivity check above ran on the full vector; the positive weights
+    # may all have belonged to rows that `na.action` removed.
+    if (!any(w_all > 0)) {
+      stop(
+        "No positive-weight observations remain after missing-data handling.",
         call. = FALSE
       )
     }

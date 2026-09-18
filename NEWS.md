@@ -1,5 +1,21 @@
 # tsco 0.0.0.9000
 
+- Weighted `rms::orm()` stage fits no longer emit rms's note that weights are
+  ignored by `validate()` and `bootcov()`. `tsco()` calls neither; the caveat
+  stays in `?tsco` under `weights`. Only that one message is silenced.
+- **Bug fix:** `weights` of length `nrow(data)` are now aligned with the
+  model frame through the `na.action` attribute (the positions of removed
+  rows) instead of by parsing `rownames()` as integers. Data frames with
+  character row names used to error, and numeric-looking row names that were
+  not row positions selected the wrong weights silently. Weights that are
+  positive only on rows removed for missing data are now a clear error.
+- **Breaking:** an `offset()` term in `formula` is now an error. Offsets were
+  documented as unsupported but were still rebuilt into the stage formulas,
+  where they failed inside `rms::orm()`.
+- The estimate-only coefficient table returned when a stage's covariance
+  cannot be extracted now carries the same reported names as `coef()`,
+  `vcov()` and the full table, instead of the backend's raw names.
+
 - **Breaking:** a formula without an intercept (`y ~ x - 1`, `y ~ 0 + x`) is
   now an error. The thresholds and multinomial intercepts are the baseline
   category probabilities and cannot be removed; previously `rms::orm()`
