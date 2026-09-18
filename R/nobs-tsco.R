@@ -13,6 +13,7 @@
 #' @return A single number.
 #'
 #' @method nobs tsco
+#' @importFrom stats nobs
 #' @export
 nobs.tsco <- function(object, ...) {
   if (!is.null(object$n_weighted)) {
