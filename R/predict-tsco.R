@@ -33,9 +33,10 @@
 #' returned matrix then carries a logical `unfitted` attribute marking those
 #' rows.
 #'
-#' A prediction row with a missing value in any predictor is likewise returned
-#' as all `NA`, with a warning, and marked in a logical `incomplete` attribute;
-#' the remaining rows are predicted normally.
+#' A prediction row with a missing or non-finite value in any predictor (for
+#' example `log(x)` at `x = 0`) is likewise returned as all `NA`, with a
+#' warning, and marked in a logical `incomplete` attribute; the remaining rows
+#' are predicted normally.
 #'
 #' @param object An object of class `"tsco"`.
 #' @param newdata Optional data frame containing predictor values at which to
@@ -44,8 +45,11 @@
 #' @param type Prediction type. `"prob"` and `"response"` return unconditional
 #'   category probabilities. `"class"` returns the most probable outcome
 #'   category. `"stage"` returns stage-specific probabilities, combined
-#'   unconditional probabilities, the stage-2 lower-partition mass, and an
-#'   indicator of rows unsupported by the stage-1 model.
+#'   unconditional probabilities, the stage-2 lower-partition mass, and
+#'   logical indicators of rows unsupported by the stage-1 model
+#'   (`unsupported_stage1`), rows whose factor level was seen only in
+#'   zero-weight observations (`unfitted`), and rows with missing or
+#'   non-finite predictors (`incomplete`).
 #' @param unsupported_stage1 How to handle prediction rows whose factor levels
 #'   were not represented in the stage-1 fitting data. Options are:
 #'   `"partial"`: return `NA` for unidentified lower-category probabilities
@@ -64,7 +68,8 @@
 #'   probabilities with one column per original outcome level. If
 #'   `type = "class"`, an ordered factor. If `type = "stage"`, a list with
 #'   stage-specific probabilities, combined probabilities, lower-partition
-#'   mass, `unsupported_stage1`, and the unsupported-row handling method.
+#'   mass, `unsupported_stage1`, the unsupported-row handling method, and the
+#'   `unfitted` and `incomplete` row indicators.
 #'
 #' @method predict tsco
 #' @export
@@ -108,17 +113,18 @@ predict.tsco <- function(
     )
   }
 
-  # Rows with a missing value in any predictor. The model frame is built with
-  # `na.pass`, so these reach this point; neither backend handles them
-  # row-wise (`orm` returns NA that later fails normalization, `vglm` drops
-  # the row and the row count no longer matches). Return them as all-NA rows
-  # and predict only the complete ones.
+  # Rows with a missing or non-finite value in any predictor. The model frame
+  # is built with `na.pass`, so these reach this point; neither backend
+  # handles them row-wise (`orm` returns NA that later fails normalization,
+  # `vglm` drops the row and the row count no longer matches), and an
+  # infinite value from e.g. `log(0)` would otherwise come back as a
+  # degenerate 0/1 row. Return them as all-NA rows and predict only the rest.
   incomplete <- .tsco_incomplete_rows(object, pred_data) & !unfitted
 
   if (any(incomplete)) {
     warning(
-      sum(incomplete), " prediction row(s) have missing predictor values; ",
-      "all probabilities for these rows are returned as NA.",
+      sum(incomplete), " prediction row(s) have missing or non-finite ",
+      "predictor values; all probabilities for these rows are returned as NA.",
       call. = FALSE
     )
   }
@@ -427,7 +433,9 @@ predict.tsco <- function(
         prob = prob,
         lower_mass = lower_mass,
         unsupported_stage1 = unsupported,
-        unsupported_stage1_method = unsupported_stage1
+        unsupported_stage1_method = unsupported_stage1,
+        unfitted = unfitted,
+        incomplete = incomplete
       )
     )
   }

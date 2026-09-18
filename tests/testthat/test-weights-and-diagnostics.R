@@ -454,7 +454,7 @@ test_that("weights align with the model frame under custom and misleading row na
   expect_equal(coef(fit_cc), coef(reference), tolerance = 1e-8)
 
   # Any other length is an error.
-  expect_error(fit_wine(wine, weights = w[-1]), "must equal nrow\\(data\\)")
+  expect_error(fit_wine(wine, weights = w[-1]), "one entry per row of `data`")
 })
 
 
@@ -629,7 +629,7 @@ test_that("a missing predictor value in newdata gives an NA row, not a failure",
         warn_degenerate = FALSE
       )
 
-      expect_warning(p <- predict(fit, newdata = nd), "missing predictor values")
+      expect_warning(p <- predict(fit, newdata = nd), "missing or non-finite")
 
       expect_equal(nrow(p), 4L)
       expect_true(all(is.na(p[2:3, ])))
@@ -643,9 +643,141 @@ test_that("a missing predictor value in newdata gives an NA row, not a failure",
       # An NA in a factor is a missing value, not an unsupported level.
       expect_false(any(attr(p, "unsupported_stage1")))
 
-      expect_warning(cls <- predict(fit, newdata = nd, type = "class"), "missing predictor values")
+      expect_warning(cls <- predict(fit, newdata = nd, type = "class"), "missing or non-finite")
       expect_true(all(is.na(cls[2:3])))
       expect_false(anyNA(cls[c(1L, 4L)]))
     }
   }
+})
+
+
+# --- weights travel through model.frame() -------------------------------------
+
+test_that("weights stay aligned under a custom na.action that records row names", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+
+  # An na.action that is valid but records the omitted rows by *name*, not
+  # position, and data whose row names are not positions.
+  na_by_name <- function(object, ...) {
+    keep <- stats::complete.cases(object)
+    out <- object[keep, , drop = FALSE]
+    omit <- as.integer(rownames(object)[!keep])
+    names(omit) <- rownames(object)[!keep]
+    class(omit) <- "omit"
+    attr(out, "na.action") <- omit
+    out
+  }
+
+  rownames(wine) <- as.character(seq_len(nrow(wine)) + 1000L)
+  set.seed(9)
+  w <- sample(1:3, nrow(wine), replace = TRUE)
+  wine$contact[c(5, 30)] <- NA
+  complete <- !is.na(wine$contact)
+
+  reference <- fit_wine(wine[complete, , drop = FALSE], weights = w[complete], po_engine = "vglm")
+
+  fit <- fit_wine(wine, weights = w, na.action = na_by_name, po_engine = "vglm")
+  expect_equal(coef(fit), coef(reference), tolerance = 1e-8)
+  expect_equal(fit$n_weighted, sum(w[complete]))
+  expect_equal(fit$n_obs, sum(complete))
+
+  # The model frame's (weights) column must not leak into the predictors.
+  expect_false("(weights)" %in% names(fit$predict_data))
+  expect_false("(weights)" %in% names(fit$data_stage2))
+  expect_false(any(grepl("weights", names(coef(fit)))))
+
+  # na.exclude behaves like na.omit here.
+  fit_ex <- fit_wine(wine, weights = w, na.action = stats::na.exclude, po_engine = "vglm")
+  expect_equal(coef(fit_ex), coef(reference), tolerance = 1e-8)
+})
+
+
+test_that("the weight-length error names both accepted lengths", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+  wine$contact[1] <- NA
+
+  expect_error(fit_wine(wine, weights = rep(1, 10)), "one entry per row of `data` or one per complete case")
+})
+
+
+# --- incomplete or non-finite fitting data are an early, clear error ----------
+
+test_that("NA or non-finite predictors surviving na.action are a clear error", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+  wine$x <- as.numeric(seq_len(nrow(wine)))
+
+  # na.pass leaves an NA factor in the frame.
+  w_na <- wine
+  w_na$temp[5] <- NA
+  expect_error(
+    fit_wine(w_na, rhs = "x + temp", na.action = stats::na.pass),
+    "`temp`.*missing or non-finite"
+  )
+
+  # log(0) is -Inf after the formula is evaluated; na.omit does not remove it.
+  w_inf <- wine
+  w_inf$x[3] <- 0
+  expect_error(
+    fit_wine(w_inf, rhs = "log(x) + temp"),
+    "`log\\(x\\)`.*missing or non-finite"
+  )
+
+  for (engine in c("orm", "vglm")) {
+    expect_error(
+      fit_wine(w_inf, rhs = "log(x) + temp", po_engine = engine),
+      "missing or non-finite"
+    )
+  }
+
+  # A missing response under na.pass is also caught.
+  w_y <- wine
+  w_y$rating[7] <- NA
+  expect_error(
+    fit_wine(w_y, rhs = "x + temp", na.action = stats::na.pass),
+    "response contains missing values"
+  )
+
+  # na.fail is honoured as-is.
+  expect_error(fit_wine(w_na, rhs = "x + temp", na.action = stats::na.fail), "missing values")
+})
+
+
+# --- non-finite transformed predictors in newdata ------------------------------
+
+test_that("non-finite values after transformation in newdata give NA rows", {
+  dat <- make_wine_test_data()
+  wine <- dat$individual
+  wine$x <- as.numeric(seq_len(nrow(wine)))
+
+  nd <- data.frame(
+    x = c(1, 0, NA, Inf, 20),
+    temp = factor("cold", levels = levels(wine$temp))
+  )
+
+  for (engine in c("orm", "vglm")) {
+    fit <- fit_wine(wine, rhs = "log(x) + temp", po_engine = engine)
+
+    expect_warning(p <- predict(fit, newdata = nd), "missing or non-finite")
+    expect_identical(unname(attr(p, "incomplete")), c(FALSE, TRUE, TRUE, TRUE, FALSE))
+    expect_true(all(is.na(p[2:4, ])))
+    expect_true(all(is.finite(p[c(1L, 5L), ])))
+
+    p_ok <- predict(fit, newdata = nd[c(1L, 5L), , drop = FALSE])
+    expect_equal(unclass(p[c(1L, 5L), ]), unclass(p_ok)[, ], ignore_attr = TRUE)
+
+    st <- suppressWarnings(predict(fit, newdata = nd, type = "stage"))
+    expect_identical(st$incomplete, attr(p, "incomplete"))
+    expect_identical(st$unfitted, rep(FALSE, 5L))
+    expect_true(all(is.na(st$prob[2:4, ])))
+  }
+
+  # Matrix-valued basis columns are screened cell-wise too.
+  fit_p <- fit_wine(wine, rhs = "poly(x, 2) + temp")
+  nd_p <- data.frame(x = c(5, NA, 10), temp = factor("warm", levels = levels(wine$temp)))
+  expect_warning(pp <- predict(fit_p, newdata = nd_p), "missing or non-finite")
+  expect_identical(unname(attr(pp, "incomplete")), c(FALSE, TRUE, FALSE))
+  expect_true(all(is.finite(pp[c(1L, 3L), ])))
 })

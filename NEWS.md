@@ -1,5 +1,22 @@
 # tsco 0.0.0.9000
 
+- `weights` of length `nrow(data)` are now passed through `model.frame()` as
+  its `weights` argument, the contract `lm()` and `glm()` use, so they stay
+  aligned with the retained rows under any `na.action`, including a user
+  function that records omitted rows by name rather than position. The
+  previous alignment through the `"na.action"` attribute assumed positions.
+- **Breaking:** `tsco()` now errors early, naming the column, when a predictor
+  in the model frame contains a missing or non-finite value, or the response
+  is missing. This replaces opaque backend failures under
+  `na.action = na.pass` and for transformations that are not finite on the
+  data, such as `log(0)`.
+- `predict()` treats non-finite predictor values (for example `log(x)` at
+  `x = 0` or `x = Inf`) like missing ones: the row is returned as all-`NA`
+  with a warning instead of a degenerate 0/1 probability row.
+  Matrix-valued basis columns such as `poly()` are screened cell-wise.
+- `predict(type = "stage")` now includes the `unfitted` and `incomplete` row
+  indicators in its list.
+
 - New `nobs()` method returning the frequency-weighted sample size
   `n_weighted`, matching the `nobs` attribute of `logLik()` and the sample
   size BIC uses. The documentation had referred to `nobs()` without the method
@@ -23,12 +40,12 @@
 - Weighted `rms::orm()` stage fits no longer emit rms's note that weights are
   ignored by `validate()` and `bootcov()`. `tsco()` calls neither; the caveat
   stays in `?tsco` under `weights`. Only that one message is silenced.
-- **Bug fix:** `weights` of length `nrow(data)` are now aligned with the
-  model frame through the `na.action` attribute (the positions of removed
-  rows) instead of by parsing `rownames()` as integers. Data frames with
-  character row names used to error, and numeric-looking row names that were
-  not row positions selected the wrong weights silently. Weights that are
-  positive only on rows removed for missing data are now a clear error.
+- **Bug fix:** `weights` of length `nrow(data)` were aligned with the model
+  frame by parsing `rownames()` as integers. Data frames with character row
+  names errored, and numeric-looking row names that were not row positions
+  selected the wrong weights silently. (The alignment now goes through
+  `model.frame()`; see above.) Weights that are positive only on rows removed
+  for missing data are now a clear error.
 - **Breaking:** an `offset()` term in `formula` is now an error. Offsets were
   documented as unsupported but were still rebuilt into the stage formulas,
   where they failed inside `rms::orm()`.

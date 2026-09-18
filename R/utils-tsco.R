@@ -1560,7 +1560,51 @@
     return(rep(FALSE, nrow(newdata)))
   }
 
-  !stats::complete.cases(newdata[, cols, drop = FALSE])
+  .tsco_bad_cells(newdata[, cols, drop = FALSE])$rows
+}
+
+#' Locate missing or non-finite predictor values in a model frame.
+#'
+#' A numeric or matrix column (`poly()`, `splines::ns()`) is bad where it is
+#' `NA`, `NaN` or infinite; any other column (factor, character, logical) is
+#' bad where it is `NA`. Infinite values arise from transformations such as
+#' `log(0)` and are just as unusable as `NA`: a fitter fails on them, and a
+#' prediction at an infinite linear predictor is a degenerate 0/1 row, not a
+#' model-based probability.
+#'
+#' @param df A data frame of predictor columns (a model frame minus the
+#'   response, possibly with matrix-valued columns).
+#' @return A list with `rows`, a logical vector marking rows with any bad
+#'   cell, and `columns`, the names of the columns containing one.
+#' @noRd
+.tsco_bad_cells <- function(df) {
+  n <- nrow(df)
+  rows <- rep(FALSE, n)
+  columns <- character()
+
+  for (nm in names(df)) {
+    x <- df[[nm]]
+
+    bad <- if (is.numeric(x) || is.complex(x)) {
+      !is.finite(x)
+    } else {
+      is.na(x)
+    }
+
+    if (is.matrix(bad)) {
+      bad <- rowSums(bad) > 0
+    }
+
+    bad <- as.logical(bad)
+    bad[is.na(bad)] <- TRUE
+
+    if (any(bad)) {
+      columns <- c(columns, nm)
+      rows <- rows | bad
+    }
+  }
+
+  list(rows = rows, columns = columns)
 }
 
 .tsco_stage1_unsupported_rows <- function(object, newdata) {

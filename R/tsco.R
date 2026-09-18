@@ -79,7 +79,12 @@
 #'   notes that weights are ignored by `rms::validate()` and `rms::bootcov()`;
 #'   `tsco()` calls neither, but the note applies if you run them yourself on a
 #'   stage fit.
-#' @param na.action Missing-data action passed to model.frame().
+#' @param na.action Missing-data action passed to [model.frame()]. It must
+#'   remove or reject incomplete rows (`na.omit`, the default, `na.exclude`,
+#'   `na.fail`, or a user function that does the same); rows with a missing or
+#'   non-finite predictor or a missing response that survive it are an error.
+#'   Weights of length `nrow(data)` are passed through `model.frame()` with the
+#'   data, so they stay aligned under any such function.
 #' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary
 #'   regressions.
 #'
@@ -141,13 +146,45 @@ tsco <- function(
     )
   }
 
-  # Build model frame using original formula. This handles na.action and also
-  # gives us a clean response object via model.response().
-  mf <- stats::model.frame(
+  # Validate weights before the model frame is built, because weights of
+  # length `nrow(data)` travel *through* `model.frame()`.
+  if (!is.null(weights)) {
+    if (!is.numeric(weights) || !is.null(dim(weights))) {
+      stop("`weights` must be a numeric vector.", call. = FALSE)
+    }
+
+    if (length(weights) == 0L ||
+        any(!is.finite(weights)) ||
+        any(weights < 0) ||
+        !any(weights > 0)) {
+      stop(
+        "`weights` must be finite, nonnegative, and contain at least one positive value.",
+        call. = FALSE
+      )
+    }
+  }
+
+  # One weight per row of `data` is handed to `model.frame()` as its
+  # `weights` argument, the same contract `lm()` and `glm()` use. The weights
+  # then pass through `na.action` alongside the response and predictors, so
+  # they stay aligned under any missing-data function -- including one that
+  # records omitted rows by name rather than position -- without this package
+  # parsing row names or the "na.action" attribute.
+  weights_in_frame <- !is.null(weights) && length(weights) == nrow(data)
+
+  mf_args <- list(
     formula = formula,
     data = data,
     na.action = na.action
   )
+
+  if (weights_in_frame) {
+    mf_args$weights <- weights
+  }
+
+  # Build model frame using original formula. This handles na.action and also
+  # gives us a clean response object via model.response().
+  mf <- do.call(stats::model.frame, mf_args)
 
   y <- stats::model.response(mf)
 
@@ -193,6 +230,37 @@ tsco <- function(
   }
 
   cov_mf <- mf[, -response_col, drop = FALSE]
+
+  # `model.frame()` appends its `weights` argument as a `(weights)` column;
+  # it is not a predictor.
+  cov_mf[["(weights)"]] <- NULL
+
+  # Anything `na.action` let through that a fitter cannot use is stopped here
+  # with the column named, instead of surfacing as an opaque backend error
+  # ("NA/NaN/Inf in 'x'", "missing value where TRUE/FALSE needed", or this
+  # package's own "predicted probability matrix contains non-finite values").
+  # This covers `na.action = na.pass` and evaluated transformations such as
+  # `log(0)`.
+  bad_cells <- .tsco_bad_cells(cov_mf)
+
+  if (any(bad_cells$rows)) {
+    stop(
+      "Predictor(s) ", paste0("`", bad_cells$columns, "`", collapse = ", "),
+      " contain missing or non-finite values in ", sum(bad_cells$rows),
+      " row(s) of the model frame. Remove or impute them, use an `na.action` ",
+      "that drops incomplete rows (`na.omit`, `na.exclude`), and check that ",
+      "inline transformations such as `log()` are finite on the data.",
+      call. = FALSE
+    )
+  }
+
+  if (!is.matrix(y) && !is.data.frame(y) && anyNA(y)) {
+    stop(
+      "The response contains missing values after `na.action`; use an ",
+      "`na.action` that drops incomplete rows (`na.omit`, `na.exclude`).",
+      call. = FALSE
+    )
+  }
 
   # Convert character predictors to factors using the full analysis dataset.
   # This prevents character predictors from being re-leveled differently in
@@ -403,58 +471,32 @@ tsco <- function(
 
   collapsed_levels <- c(lower_collapsed_label, upper_levels)
 
-  # Validate and align weights.
+  # Align weights with the model frame.
   if (!is.null(weights)) {
-    if (!is.numeric(weights) || !is.null(dim(weights))) {
-      stop("`weights` must be a numeric vector.", call. = FALSE)
-    }
+    if (weights_in_frame) {
+      # Already carried through `na.action` by `model.frame()`.
+      w_all <- as.numeric(stats::model.weights(mf))
 
-    if (length(weights) == 0L ||
-        any(!is.finite(weights)) ||
-        any(weights < 0) ||
-        !any(weights > 0)) {
-      stop(
-        "`weights` must be finite, nonnegative, and contain at least one positive value.",
-        call. = FALSE
-      )
-    }
-
-    if (length(weights) == nrow(mf)) {
-      w_all <- weights
-    } else if (length(weights) == nrow(data)) {
-      # Rows removed by `na.action` are recorded as *positions* in the
-      # model frame's "na.action" attribute. Using those, rather than parsing
-      # `rownames(mf)` as integers, keeps alignment right for data frames with
-      # character row names (which used to error) and for numeric-looking row
-      # names that are not row positions (which used to select silently wrong
-      # weights).
-      omitted <- attr(mf, "na.action")
-
-      keep <- if (is.null(omitted)) {
-        seq_len(nrow(data))
-      } else {
-        setdiff(seq_len(nrow(data)), as.integer(omitted))
-      }
-
-      if (length(keep) != nrow(mf)) {
+      if (length(w_all) != nrow(mf)) {
         stop(
-          "Could not align `weights` with the model frame after missing-data ",
-          "handling. Supply one weight per row of `data`, or one per complete ",
-          "case.",
+          "Internal error: `model.frame()` did not return one weight per row.",
           call. = FALSE
         )
       }
-
-      w_all <- weights[keep]
+    } else if (length(weights) == nrow(mf)) {
+      # One weight per complete case. This is the caller's assertion about
+      # which rows survived `na.action`; it cannot be verified here.
+      w_all <- weights
     } else {
       stop(
-        "`weights` must equal nrow(data) or the number of complete cases.",
+        "`weights` must have one entry per row of `data` or one per complete ",
+        "case (", nrow(mf), " here); got ", length(weights), ".",
         call. = FALSE
       )
     }
 
-    # The positivity check above ran on the full vector; the positive weights
-    # may all have belonged to rows that `na.action` removed.
+    # The positivity check ran on the full vector; the positive weights may
+    # all have belonged to rows that `na.action` removed.
     if (!any(w_all > 0)) {
       stop(
         "No positive-weight observations remain after missing-data handling.",
