@@ -584,6 +584,23 @@
   out
 }
 
+#' Terms a joint test should cover: the user's formula terms.
+#'
+#' Stage 1 may have dropped terms that are constant below the cutoff, so the
+#' stage-1 formula is not the right source. Older objects without
+#' `term_labels` fall back to the union of the two stage formulas.
+#' @noRd
+.tsco_joint_test_terms <- function(object) {
+  if (!is.null(object$term_labels)) {
+    return(object$term_labels)
+  }
+
+  unique(c(
+    attr(stats::terms(object$stage1_formula), "term.labels"),
+    attr(stats::terms(object$stage2_formula), "term.labels")
+  ))
+}
+
 .tsco_joint_wald_tests <- function(object) {
   b <- stats::coef(object, stage = "both")
   V <- stats::vcov(object, stage = "both")
@@ -664,7 +681,7 @@
   }
 
   coef_terms <- coef_terms[names(b)]
-  term_labels <- attr(stats::terms(object$stage1_formula), "term.labels")
+  term_labels <- .tsco_joint_test_terms(object)
   test_names <- term_labels[term_labels %in% unique(coef_terms[!is.na(coef_terms)])]
 
   if (length(test_names) == 0L) {
@@ -672,7 +689,13 @@
   }
 
   res <- lapply(test_names, function(term) {
-    idx <- which(coef_terms == term)
+    # Type-II semantics: the term and every term containing it, in either
+    # stage, so the hypothesis is that the term plays no role at all.
+    drop_set <- unique(c(
+      .tsco_terms_containing(term, object$stage1_formula),
+      .tsco_terms_containing(term, object$stage2_formula)
+    ))
+    idx <- which(coef_terms %in% drop_set)
 
     b_term <- b[idx]
     V_term <- V[names(b_term), names(b_term), drop = FALSE]
@@ -731,8 +754,9 @@
 #' @param fit A fitted stage model.
 #' @param engine The stage fitting backend, either "orm" or "vglm".
 #' @param coef_table A stage coefficient table from `.tsco_coef_table()`.
-#' @param max_abs_coef,max_se Thresholds above which a coefficient is treated
-#'   as separated.
+#' @param max_abs_coef,max_se Thresholds: a slope estimate beyond
+#'   `max_abs_coef` in absolute value, or a slope standard error beyond
+#'   `max_se`, is reported as a separation signature.
 #' @return A list with `converged`, `separated`, and `messages`.
 #' @noRd
 .tsco_stage_diagnostics <- function(
@@ -781,11 +805,19 @@
     b <- coef_table[, "Estimate"]
     se <- coef_table[, "Std. Error"]
 
+    # A slope beyond `max_abs_coef` on the log-odds scale (an odds ratio
+    # above e^10, about 22,000) is not a plausible effect in this package's
+    # applications; it is a fitter stopping on a flat likelihood. `rms::orm()`
+    # does so at estimates around 10 with standard errors in the tens, so
+    # requiring a large standard error as well, as this once did, let the
+    # motivating case -- an arm with no outcomes at or above the cutoff --
+    # pass unflagged. A huge standard error alone is also flagged.
     flagged <- which(
       is_slope & (
         !is.finite(b) |
           !is.finite(se) |
-          (abs(b) > max_abs_coef & se > max_se)
+          abs(b) > max_abs_coef |
+          se > max_se
       )
     )
 
@@ -821,29 +853,40 @@
 #' only of plain variables completely unchanged.
 #'
 #' @param tt A terms object for the user's original formula.
-#' @return A character vector of term labels for the stage formulas.
+#' @param exclude Model-frame variable names to leave out. Every term that
+#'   involves one of them (main effect or interaction) is dropped. Used for
+#'   stage 1, where a predictor can be constant among the observations below
+#'   the cutoff and therefore inestimable alongside the intercept.
+#' @return A character vector of term labels for the stage formulas, with
+#'   attribute `dropped` naming the original term labels that `exclude`
+#'   removed.
 #' @noRd
-.tsco_stage_rhs_labels <- function(tt) {
+.tsco_stage_rhs_labels <- function(tt, exclude = character()) {
   term_labels <- attr(tt, "term.labels")
   fac <- attr(tt, "factors")
 
   labels <- character()
+  dropped <- character()
 
   if (length(term_labels) > 0L) {
     if (is.null(fac) || length(fac) == 0L || is.null(rownames(fac))) {
-      labels <- paste0("`", term_labels, "`")
+      keep <- !(term_labels %in% exclude)
+      dropped <- term_labels[!keep]
+      labels <- paste0("`", term_labels[keep], "`")
     } else {
+      term_vars <- lapply(term_labels, function(lab) rownames(fac)[fac[, lab] > 0L])
+      keep <- !vapply(term_vars, function(v) any(v %in% exclude), logical(1L))
+      dropped <- term_labels[!keep]
       labels <- vapply(
-        term_labels,
-        function(lab) {
-          vars <- rownames(fac)[fac[, lab] > 0L]
-          paste0("`", vars, "`", collapse = ":")
-        },
+        term_vars[keep],
+        function(vars) paste0("`", vars, "`", collapse = ":"),
         character(1L),
         USE.NAMES = FALSE
       )
     }
   }
+
+  attr(labels, "dropped") <- dropped
 
   # Offsets are rejected in `tsco()` before this point, so there is nothing to
   # carry through. Rebuilding them here would be the only untested route by
@@ -851,8 +894,44 @@
   labels
 }
 
-.tsco_stage_engine <- function(kind, grouped, po_engine, weighted = FALSE) {
+#' Is a model-frame column constant (a single distinct value)?
+#'
+#' Factors and character vectors are constant with one distinct non-missing
+#' value; numeric vectors with a zero range; a matrix column (`poly()`) only
+#' if every column is constant.
+#'
+#' @param x A model-frame column.
+#' @return Logical scalar.
+#' @noRd
+.tsco_is_constant_column <- function(x) {
+  if (is.matrix(x)) {
+    return(all(apply(x, 2L, .tsco_is_constant_column)))
+  }
+
+  x <- x[!is.na(x)]
+
+  if (length(x) <= 1L) {
+    return(TRUE)
+  }
+
+  if (is.numeric(x)) {
+    return(isTRUE(diff(range(x)) == 0))
+  }
+
+  length(unique(as.character(x))) <= 1L
+}
+
+.tsco_stage_engine <- function(kind, grouped, po_engine, weighted = FALSE,
+                               intercept_only = FALSE) {
   if (!identical(kind, "po")) {
+    return("vglm")
+  }
+
+  # `rms::orm(y ~ 1)` fails outright on some rms releases, so an
+  # intercept-only PO stage always uses VGAM, whatever `po_engine` says. This
+  # arises when every predictor is constant among the stage's observations,
+  # e.g. a treatment arm with no outcomes below the cutoff.
+  if (isTRUE(intercept_only)) {
     return("vglm")
   }
 
@@ -1108,20 +1187,66 @@
   if (length(out) != 1L || !is.finite(out)) NA_real_ else out
 }
 
+#' Terms of a formula that contain a given term, including itself.
+#'
+#' Containment is by variable set: `arm:w` contains `arm` and `w`, and
+#' `arm:w:z` contains all of `arm`, `w`, `arm:w`, ... This is what the joint
+#' tests remove when testing a term, so the hypothesis is "this term plays no
+#' role at all" (the type-II convention) rather than "its main effect is zero
+#' given its interactions", which would depend on how covariates are
+#' centered and which `rms::orm()` cannot fit anyway because it requires
+#' formulas to respect marginality.
+#'
+#' @param term A term label of the user's formula.
+#' @param formula A stage formula whose terms are built from the same
+#'   model-frame variable names.
+#' @return Character vector of the stage formula's term labels that contain
+#'   `term`; empty if the stage formula does not involve it.
+#' @noRd
+.tsco_terms_containing <- function(term, formula) {
+  tt <- stats::terms(formula)
+  labels <- attr(tt, "term.labels")
+  fac <- attr(tt, "factors")
+
+  if (length(labels) == 0L) {
+    return(character())
+  }
+
+  if (!term %in% labels) {
+    return(character())
+  }
+
+  if (is.null(fac) || length(fac) == 0L) {
+    return(term)
+  }
+
+  vars <- rownames(fac)[fac[, term] > 0L]
+
+  labels[vapply(
+    labels,
+    function(lab) all(fac[vars, lab, drop = FALSE] > 0L),
+    logical(1L)
+  )]
+}
+
 .tsco_drop_term_formula <- function(formula, term) {
+  # `term` may be a set of labels; all are removed at once.
   tt <- stats::terms(formula)
   term_labels <- attr(tt, "term.labels")
 
   pos <- match(term, term_labels)
 
-  if (is.na(pos)) {
-    stop("Term not found in formula: ", term, call. = FALSE)
+  if (anyNA(pos)) {
+    stop(
+      "Term not found in formula: ", paste(term[is.na(pos)], collapse = ", "),
+      call. = FALSE
+    )
   }
 
   # `stats::drop.terms()` cannot build an intercept-only formula on every
   # supported R version, so construct the reduced formula directly. This keeps
   # joint tests available for single-predictor models such as `y ~ treatment`.
-  if (length(term_labels) == 1L) {
+  if (length(term_labels) == length(pos)) {
     if (attr(tt, "intercept") == 0L) {
       stop(
         "Cannot drop the only term from a formula without an intercept.",
@@ -1220,7 +1345,7 @@
     )
   }
 
-  term_labels <- attr(stats::terms(object$stage1_formula), "term.labels")
+  term_labels <- .tsco_joint_test_terms(object)
 
   if (length(term_labels) == 0L) {
     return(
@@ -1284,67 +1409,76 @@
   stage1_args <- object$stage1_args
   stage2_args <- object$stage2_args
 
-  # Dropping the only term leaves an intercept-only model in both stages,
-  # whose fit is available in closed form.
-  null_reduced <- length(term_labels) == 1L
+  stage1_terms <- attr(stats::terms(object$stage1_formula), "term.labels")
+  stage2_terms <- attr(stats::terms(object$stage2_formula), "term.labels")
+
+  # Reduced-model log-likelihood and df for one stage after dropping `term`.
+  # Three cases: the term is not in this stage's formula (stage 1 drops
+  # predictors that are constant below the cutoff), so the reduced model is
+  # the full one; it is the only term, so the reduced model is intercept-only
+  # and available in closed form; or it is one of several, so refit.
+  stage_reduced <- function(term, stage_terms, formula, kind, engine, data,
+                            weights, stage_args, counts, levels, totals,
+                            ll_full, df_full) {
+    # Type-II semantics: remove the term and every term containing it.
+    drop_set <- .tsco_terms_containing(term, formula)
+
+    if (length(drop_set) == 0L) {
+      return(list(loglik = ll_full, df = df_full))
+    }
+
+    if (length(drop_set) == length(stage_terms)) {
+      null <- .tsco_null_stage_fit_stats(totals)
+
+      if (!is.finite(null$loglik)) {
+        stop(
+          "Could not compute intercept-only reduced-model log-likelihoods.",
+          call. = FALSE
+        )
+      }
+
+      return(null)
+    }
+
+    f_reduced <- .tsco_drop_term_formula(formula, drop_set)
+
+    fit_reduced <- .tsco_fit_stage(
+      formula = f_reduced,
+      kind = kind,
+      engine = engine,
+      data = data,
+      weights = weights,
+      stage_args = stage_args
+    )
+
+    ll <- reduced_loglik(fit_reduced, engine, data, counts, levels)
+
+    if (!is.finite(ll)) {
+      stop("Could not compute reduced-model log-likelihoods.", call. = FALSE)
+    }
+
+    list(loglik = ll, df = .tsco_df(fit_reduced))
+  }
 
   res <- lapply(term_labels, function(term) {
     tryCatch({
-      if (null_reduced) {
-        null1 <- .tsco_null_stage_fit_stats(object$totals_stage1)
-        null2 <- .tsco_null_stage_fit_stats(object$totals_stage2)
-
-        ll1_reduced <- null1$loglik
-        ll2_reduced <- null2$loglik
-        df1_reduced <- null1$df
-        df2_reduced <- null2$df
-
-        if (!is.finite(ll1_reduced) || !is.finite(ll2_reduced)) {
-          stop(
-            "Could not compute intercept-only reduced-model log-likelihoods.",
-            call. = FALSE
-          )
-        }
-      } else {
-
-      f1_reduced <- .tsco_drop_term_formula(object$stage1_formula, term)
-      f2_reduced <- .tsco_drop_term_formula(object$stage2_formula, term)
-
-      fit1_reduced <- .tsco_fit_stage(
-        formula = f1_reduced,
-        kind = object$stage1,
-        engine = stage1_engine,
-        data = object$data_stage1,
-        weights = object$weights_stage1,
-        stage_args = stage1_args
+      red1 <- stage_reduced(
+        term, stage1_terms, object$stage1_formula, object$stage1,
+        stage1_engine, object$data_stage1, object$weights_stage1, stage1_args,
+        object$counts_stage1, stage1_levels, object$totals_stage1,
+        ll1_full, df1_full
+      )
+      red2 <- stage_reduced(
+        term, stage2_terms, object$stage2_formula, object$stage2,
+        stage2_engine, object$data_stage2, object$weights_stage2, stage2_args,
+        object$counts_stage2, stage2_levels, object$totals_stage2,
+        ll2_full, df2_full
       )
 
-      fit2_reduced <- .tsco_fit_stage(
-        formula = f2_reduced,
-        kind = object$stage2,
-        engine = stage2_engine,
-        data = object$data_stage2,
-        weights = object$weights_stage2,
-        stage_args = stage2_args
-      )
-
-      ll1_reduced <- reduced_loglik(
-        fit1_reduced, stage1_engine, object$data_stage1,
-        object$counts_stage1, stage1_levels
-      )
-      ll2_reduced <- reduced_loglik(
-        fit2_reduced, stage2_engine, object$data_stage2,
-        object$counts_stage2, stage2_levels
-      )
-
-      if (!is.finite(ll1_reduced) || !is.finite(ll2_reduced)) {
-        stop("Could not compute reduced-model log-likelihoods.", call. = FALSE)
-      }
-
-      df1_reduced <- .tsco_df(fit1_reduced)
-      df2_reduced <- .tsco_df(fit2_reduced)
-
-      }
+      ll1_reduced <- red1$loglik
+      ll2_reduced <- red2$loglik
+      df1_reduced <- red1$df
+      df2_reduced <- red2$df
 
       lrt <- 2 * (
         (ll1_full + ll2_full) -

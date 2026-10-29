@@ -88,6 +88,21 @@
 #' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary
 #'   regressions.
 #'
+#' @section Predictors constant below the cutoff:
+#' Stage 1 is fitted only to observations below `cutoff_level`. A predictor
+#' that takes a single value among those observations -- typically a treatment
+#' arm in which no outcome falls below the cutoff -- carries no information
+#' about Y | Y < C and cannot be estimated alongside the stage-1 intercept, so
+#' every term involving it is dropped from the stage-1 model with a warning;
+#' the dropped terms are recorded in `stage1_dropped_terms`. Stage 2 keeps the
+#' full formula. Joint tests still cover every term of `formula`, with a term
+#' absent from stage 1 tested through stage 2 alone. Conditional probabilities
+#' for the other values of such a predictor are not identified; see
+#' `unsupported_stage1` in [predict.tsco()]. A stage left with no terms is
+#' intercept-only and is always fitted with [VGAM::vglm()], whatever
+#' `po_engine` says, because `rms::orm()` does not fit intercept-only models
+#' on every release.
+#'
 #' @section Limitations:
 #' Prediction-time stage-1 support checks compare factor levels marginally and
 #' do not detect absent combinations of observed levels induced by interaction
@@ -106,7 +121,9 @@
 #'   individual-level scale, `n_obs` and `n_weighted` are the unweighted and
 #'   frequency-weighted sample sizes, and `data_stage1`, `data_stage2`,
 #'   `stage1_formula` and `stage2_formula` are the stage fitting data and
-#'   formulas. The calls recorded inside `fit_stage1` and `fit_stage2` are
+#'   formulas, `term_labels` holds the terms of `formula`, and
+#'   `stage1_dropped_terms` names those dropped from stage 1 because a
+#'   predictor was constant below the cutoff. The calls recorded inside `fit_stage1` and `fit_stage2` are
 #'   compacted to save memory, with the data, weights and family replaced by
 #'   placeholders, and are not intended for re-evaluation: `update()` or
 #'   similar on a stage fit will fail. Refit through `tsco()`, or use the
@@ -547,9 +564,9 @@ tsco <- function(
   # model-frame columns. For a formula of plain variables this reproduces the
   # original right-hand side exactly; for one containing inline
   # transformations it resolves them against the columns that exist.
-  rhs_labels <- .tsco_stage_rhs_labels(tt)
+  make_stage_formula <- function(response_name, exclude = character()) {
+    rhs_labels <- .tsco_stage_rhs_labels(tt, exclude = exclude)
 
-  make_stage_formula <- function(response_name) {
     rhs <- if (length(rhs_labels) == 0L) {
       "1"
     } else {
@@ -610,7 +627,6 @@ tsco <- function(
     y1_counts <- y1_mat
     y2_counts <- y2_mat
 
-    stage1_formula <- make_stage_formula(".tsco_y_stage1")
     stage2_formula <- make_stage_formula(".tsco_y_stage2")
 
     w1 <- if (is.null(w_all)) NULL else w_all[has_lower]
@@ -620,6 +636,14 @@ tsco <- function(
     # Individual-level data.
 
     is_lower <- y_chr %in% lower_levels
+
+    if (!any(is_lower)) {
+      stop(
+        "No observations fall below `cutoff_level`; stage 1 cannot be fit. ",
+        "Choose a lower `cutoff_level`.",
+        call. = FALSE
+      )
+    }
 
     n_groups <- nrow(mf)
     n_obs <- nrow(mf)
@@ -654,7 +678,6 @@ tsco <- function(
       levels = collapsed_levels
     )
 
-    stage1_formula <- make_stage_formula(".tsco_y_stage1")
     stage2_formula <- make_stage_formula(".tsco_y_stage2")
 
     w1 <- if (is.null(w_all)) NULL else w_all[is_lower]
@@ -675,6 +698,45 @@ tsco <- function(
   for (nm in intersect(factor_predictors, names(d2))) {
     d2[[nm]] <- droplevels(d2[[nm]])
   }
+
+  # --------------------------------------------------------------------------
+  # Predictors constant within stage 1.
+  #
+  # Stage 1 is fitted to the observations below the cutoff. A predictor that
+  # takes a single value there -- the typical case is a treatment arm with no
+  # outcomes below the cutoff -- carries no information about Y | Y < C and
+  # is collinear with the intercept; a one-level factor also makes
+  # `model.matrix()` fail outright. Every term involving such a predictor is
+  # dropped from the stage-1 formula. Stage 2 keeps the full formula. The
+  # conditional probabilities for the other values of a dropped predictor are
+  # not identified, which `predict()` reports through `stage1_factor_levels`
+  # and the `unsupported_stage1` policy.
+  # --------------------------------------------------------------------------
+
+  stage1_predictor_cols <- setdiff(names(d1), ".tsco_y_stage1")
+  stage1_constant <- stage1_predictor_cols[
+    vapply(stage1_predictor_cols, function(nm) .tsco_is_constant_column(d1[[nm]]), logical(1L))
+  ]
+
+  stage1_formula <- make_stage_formula(".tsco_y_stage1", exclude = stage1_constant)
+  stage1_dropped_terms <- attr(
+    .tsco_stage_rhs_labels(tt, exclude = stage1_constant), "dropped"
+  )
+
+  if (length(stage1_dropped_terms) > 0L) {
+    warning(
+      "Stage 1 (Y | Y < ", cutoff_level, "): predictor(s) ",
+      paste0("`", stage1_constant, "`", collapse = ", "),
+      " take a single value among the observations below the cutoff, so the ",
+      "term(s) ", paste0("`", stage1_dropped_terms, "`", collapse = ", "),
+      " were dropped from the stage-1 model. Conditional probabilities ",
+      "Y | Y < ", cutoff_level, " are not identified for other values of ",
+      "these predictors; see `unsupported_stage1` in ?predict.tsco.",
+      call. = FALSE
+    )
+  }
+
+  stage1_intercept_only <- length(attr(stats::terms(stage1_formula), "term.labels")) == 0L
 
   if (!is.null(w1) && !any(w1 > 0)) {
     stop(
@@ -752,7 +814,8 @@ tsco <- function(
     stage1,
     grouped = is_grouped,
     po_engine = po_engine,
-    weighted = !is.null(w1)
+    weighted = !is.null(w1),
+    intercept_only = stage1_intercept_only
   )
   stage2_engine <- .tsco_stage_engine(
     stage2,
@@ -829,6 +892,9 @@ tsco <- function(
     formula = formula,
     stage1_formula = stage1_formula,
     stage2_formula = stage2_formula,
+    # Terms of the user's formula, and those stage 1 could not estimate.
+    term_labels = attr(tt, "term.labels"),
+    stage1_dropped_terms = stage1_dropped_terms,
     stage1 = stage1,
     stage2 = stage2,
     cutoff_level = cutoff_level,

@@ -20,6 +20,12 @@
 #' @param joint_test Character string specifying the type of joint test to
 #'  perform across stages. Options are `"LRT"` for likelihood ratio test,
 #'  `"Wald"` for Wald test, or `"none"` to skip joint tests. Default is `"LRT"`.
+#'  Each test covers one term of the model formula together with every
+#'  higher-order term that contains it, in both stages (the type-II
+#'  convention), so the null hypothesis for `arm` in `y ~ arm * w` is that
+#'  `arm` and `arm:w` are all zero: the arm plays no role at all. A term that
+#'  stage 1 dropped because it was constant below the cutoff is tested
+#'  through stage 2 alone.
 #' @param ... Ignored.
 #'
 #' @return An object of class `"summary.tsco"`.
@@ -302,7 +308,8 @@ print.summary.tsco <- function(
 
   if (x$joint_test_type != "none") {
     cat("\nJoint", x$joint_test_type, "tests across stages:\n")
-    cat("  H0: all stage-specific coefficients for the term are zero\n")
+    cat("  H0: all coefficients for the term, and for every term containing it,\n")
+    cat("      are zero in both stages\n")
     if (is.null(x$joint_tests) || nrow(x$joint_tests) == 0L) {
       cat("  No joint tests available.\n")
     } else {

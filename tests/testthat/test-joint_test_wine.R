@@ -21,8 +21,11 @@ test_that("Wald tests combine all coefficients belonging to a formula term", {
 
     wald <- summary(fit, joint_test = "Wald")$joint_tests
 
+    # Type-II semantics: a term's test covers it and every term containing
+    # it, in both stages. grp: (2 + 2) slopes per stage; z: (1 + 2) per stage;
+    # grp:z: 2 per stage.
     expect_identical(rownames(wald), c("grp", "z", "grp:z"))
-    expect_equal(wald$df, c(4, 2, 4))
+    expect_equal(wald$df, c(8, 6, 4))
     expect_equal(sum(!is.finite(wald$Chisq)), 0L)
   }
 })

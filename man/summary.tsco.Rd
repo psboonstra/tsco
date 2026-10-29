@@ -11,7 +11,13 @@
 
 \item{joint_test}{Character string specifying the type of joint test to
 perform across stages. Options are \code{"LRT"} for likelihood ratio test,
-\code{"Wald"} for Wald test, or \code{"none"} to skip joint tests. Default is \code{"LRT"}.}
+\code{"Wald"} for Wald test, or \code{"none"} to skip joint tests. Default is \code{"LRT"}.
+Each test covers one term of the model formula together with every
+higher-order term that contains it, in both stages (the type-II
+convention), so the null hypothesis for \code{arm} in \code{y ~ arm * w} is that
+\code{arm} and \code{arm:w} are all zero: the arm plays no role at all. A term that
+stage 1 dropped because it was constant below the cutoff is tested
+through stage 2 alone.}
 
 \item{...}{Ignored.}
 }

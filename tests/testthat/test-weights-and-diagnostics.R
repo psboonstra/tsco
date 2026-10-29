@@ -263,6 +263,26 @@ test_that("the separation heuristic looks at slope rows only", {
   expect_true(d$separated)
   expect_match(d$messages, "coefficient\\(s\\) x ")
 
+  # A large slope with a merely moderate SE is what orm returns when it
+  # stops on a flat likelihood; it is flagged on the estimate alone.
+  tab <- make_table(
+    est = c(-1, 0.5, 10.07, 0.3),
+    se = c(0.3, 0.2, 37.5, 0.1),
+    names = c("Y<=1", "Y<=2", "x", "z")
+  )
+  d <- .tsco_stage_diagnostics(fake_fit, engine = "orm", coef_table = tab)
+  expect_true(d$separated)
+  expect_match(d$messages, "coefficient\\(s\\) x ")
+
+  # ... and an ordinary slope with an ordinary SE is not.
+  tab <- make_table(
+    est = c(-1, 0.5, 2.5, 0.3),
+    se = c(0.3, 0.2, 0.9, 0.1),
+    names = c("Y<=1", "Y<=2", "x", "z")
+  )
+  d <- .tsco_stage_diagnostics(fake_fit, engine = "orm", coef_table = tab)
+  expect_false(d$separated)
+
   # Multinomial intercepts are thresholds too.
   tab <- make_table(
     est = c(-40, 12, 0.3),

@@ -112,7 +112,9 @@ An object of class "tsco". Among its components, \code{fit_stage1} and
 individual-level scale, \code{n_obs} and \code{n_weighted} are the unweighted and
 frequency-weighted sample sizes, and \code{data_stage1}, \code{data_stage2},
 \code{stage1_formula} and \code{stage2_formula} are the stage fitting data and
-formulas. The calls recorded inside \code{fit_stage1} and \code{fit_stage2} are
+formulas, \code{term_labels} holds the terms of \code{formula}, and
+\code{stage1_dropped_terms} names those dropped from stage 1 because a
+predictor was constant below the cutoff. The calls recorded inside \code{fit_stage1} and \code{fit_stage2} are
 compacted to save memory, with the data, weights and family replaced by
 placeholders, and are not intended for re-evaluation: \code{update()} or
 similar on a stage fit will fail. Refit through \code{tsco()}, or use the
@@ -134,6 +136,23 @@ The response may be either an individual-level ordinal outcome or a grouped
 count response supplied using cbind(), as in
 cbind(normal, mild, severe) ~ x.
 }
+\section{Predictors constant below the cutoff}{
+
+Stage 1 is fitted only to observations below \code{cutoff_level}. A predictor
+that takes a single value among those observations -- typically a treatment
+arm in which no outcome falls below the cutoff -- carries no information
+about Y | Y < C and cannot be estimated alongside the stage-1 intercept, so
+every term involving it is dropped from the stage-1 model with a warning;
+the dropped terms are recorded in \code{stage1_dropped_terms}. Stage 2 keeps the
+full formula. Joint tests still cover every term of \code{formula}, with a term
+absent from stage 1 tested through stage 2 alone. Conditional probabilities
+for the other values of such a predictor are not identified; see
+\code{unsupported_stage1} in \code{\link[=predict.tsco]{predict.tsco()}}. A stage left with no terms is
+intercept-only and is always fitted with \code{\link[VGAM:vglm]{VGAM::vglm()}}, whatever
+\code{po_engine} says, because \code{rms::orm()} does not fit intercept-only models
+on every release.
+}
+
 \section{Limitations}{
 
 Prediction-time stage-1 support checks compare factor levels marginally and
