@@ -1,4 +1,36 @@
-# tsco (development version)
+# tsco 0.2.0
+
+- Individual-level data with no observation below `cutoff_level` now stop
+  early with a clear message, as grouped data already did, instead of reaching
+  the stage-1 level check (and, briefly, a spurious constant-predictor
+  warning).
+- **Breaking:** joint tests now follow the type-II convention. The test for a
+  term drops that term together with every higher-order term containing it,
+  in both stages, so the null for `arm` in `y ~ arm * w` is that `arm` and
+  `arm:w` are all zero. Previously only the named term was dropped, which
+  tests a centering-dependent hypothesis and, under `rms::orm()`, failed
+  outright because `orm` refuses non-hierarchical formulas such as
+  `w + arm:w`. Degrees of freedom for main effects that have interactions
+  increase accordingly; tests for terms with no interactions are unchanged.
+- The separation diagnostic now flags a slope whose estimate exceeds 10 in
+  absolute value on its own, or whose standard error exceeds 50 on its own,
+  instead of requiring both. `rms::orm()` stops on a flat likelihood at
+  estimates near 10 with standard errors in the tens, so an arm with no
+  outcomes at or above the cutoff -- complete separation in stage 2 -- went
+  unflagged on the default engine.
+
+- **Bug fix:** a predictor that is constant among the observations below the
+  cutoff -- the two-arm design in which the treatment arm never falls below
+  it -- made `tsco()` fail with "contrasts can be applied only to factors with
+  2 or more levels". Every term involving such a predictor is now dropped
+  from the stage-1 model with a warning and recorded in
+  `stage1_dropped_terms`; stage 2 keeps the full formula. The joint
+  likelihood-ratio and Wald tests cover every term of `formula`, testing a
+  term absent from stage 1 through stage 2 alone, where previously they
+  iterated over the stage-1 terms only. An intercept-only PO stage is fitted
+  with `VGAM::vglm()` regardless of `po_engine`, since `rms::orm(y ~ 1)`
+  fails on some rms releases. Fitted objects gain `term_labels` and
+  `stage1_dropped_terms`.
 
 # tsco 0.1.0
 
