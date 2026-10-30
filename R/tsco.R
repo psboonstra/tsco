@@ -103,7 +103,11 @@
 #' In both cases the stage-1 likelihood factor is exactly 1 and carries no
 #' parameters, so the TSCO model coincides with its stage-2 model: a
 #' proportional-odds (`stage2 = "po"`) or multinomial (`stage2 =
-#' "multinomial"`) model on all K outcome levels. `tsco()` fits that model,
+#' "multinomial"`) model on all K outcome levels. Note that the default is
+#' `stage2 = "multinomial"`, so a degenerate cutoff with default arguments
+#' fits a baseline-category multinomial logit with a separate slope per
+#' category, not a proportional-odds model; pass `stage2 = "po"` for the
+#' latter. `tsco()` fits that model,
 #' warns (unless `warn_degenerate = FALSE`), and records
 #' `stage1_degenerate = TRUE`; `fit_stage1`, `data_stage1`, `counts_stage1`
 #' and `totals_stage1` are `NULL` and `stage1_engine` is `NA`. All methods
@@ -515,7 +519,13 @@ tsco <- function(
       if (length(lower_levels) == 0L) "no categories" else "a single category",
       " and is degenerate. Only the stage-2 model is fitted, which is an ",
       "ordinary ", .tsco_model_label(stage2), " model on all ", K,
-      " outcome levels; `stage1` has no effect.",
+      " outcome levels (`stage2 = \"", stage2, "\"`",
+      if (identical(stage2, "multinomial")) {
+        "; for a proportional-odds model set `stage2 = \"po\"`"
+      } else {
+        ""
+      },
+      "). `stage1` has no effect.",
       call. = FALSE
     )
   }

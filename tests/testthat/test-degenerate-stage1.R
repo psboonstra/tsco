@@ -166,6 +166,20 @@ test_that("degenerate stage 1 works for multinomial stage 2 and grouped data", {
 })
 
 
+test_that("the degenerate warning names the stage-2 model type and how to get PO", {
+  d <- make_degenerate_data()
+
+  expect_warning(
+    tsco(y ~ arm + x, data = d, cutoff_level = "a"),
+    "multinomial model on all 4 outcome levels \\(`stage2 = \"multinomial\"`; for a proportional-odds model set `stage2 = \"po\"`\\)"
+  )
+  expect_warning(
+    tsco(y ~ arm + x, data = d, cutoff_level = "a", stage2 = "po"),
+    "proportional odds model on all 4 outcome levels \\(`stage2 = \"po\"`\\)"
+  )
+})
+
+
 test_that("a non-degenerate cutoff is unaffected", {
   d <- make_degenerate_data()
   fit <- tsco(y ~ arm + x, data = d, cutoff_level = "c", stage1 = "po", stage2 = "po")

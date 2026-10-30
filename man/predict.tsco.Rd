@@ -86,6 +86,10 @@ has information about it and every probability for that row is \code{NA}; the
 returned matrix then carries a logical \code{unfitted} attribute marking those
 rows.
 
+When stage 1 is degenerate (see \code{\link[=tsco]{tsco()}}), the predictions are those of the
+stage-2 model on all outcome levels, no row is unsupported, and
+\code{unsupported_stage1} has no effect.
+
 A prediction row with a missing or non-finite value in any predictor (for
 example \code{log(x)} at \code{x = 0}) is likewise returned as all \code{NA}, with a
 warning, and marked in a logical \code{incomplete} attribute; the remaining rows

@@ -35,7 +35,11 @@ with \code{relevel()} instead.}
 \item{data}{A data.frame.}
 
 \item{cutoff_level}{The first outcome level in the upper partition, supplied
-as a level label.}
+as a level label. Any outcome level is accepted. With the lowest or the
+second level, stage 1 has fewer than two categories and is degenerate:
+only the stage-2 model is fitted, which is then an ordinary
+proportional-odds or multinomial model on all outcome levels (see the
+section on degenerate stages).}
 
 \item{levels}{Optional character vector specifying the ordinal outcome level
 order. For individual-level data, observed outcome values must be contained
@@ -45,7 +49,8 @@ columns into ordinal order. For grouped count data without column names,
 \code{levels} is assumed to describe the existing cbind() column order.}
 
 \item{stage1}{Model for the conditional lower partition Y | Y < C.
-Either "po" for proportional odds or "multinomial".}
+Either "po" for proportional odds or "multinomial". Ignored when stage 1
+is degenerate.}
 
 \item{stage2}{Model for the collapsed marginal outcome formed by combining
 all levels below the cutoff with C, ..., K - 1. Either "multinomial" or
@@ -102,8 +107,11 @@ non-finite predictor or a missing response that survive it are an error.
 Weights of length \code{nrow(data)} are passed through \code{model.frame()} with the
 data, so they stay aligned under any such function.}
 
-\item{warn_degenerate}{If TRUE, warn when K = 3, which reduces to two binary
-regressions.}
+\item{warn_degenerate}{If TRUE (the default), warn when the model
+degenerates: when K = 3, so that both stages are binary regressions and
+the PO/multinomial choice is immaterial, and when \code{cutoff_level} leaves
+fewer than two categories below it, so that stage 1 is not fitted. Set to
+FALSE in simulation code that sweeps over cutoffs.}
 }
 \value{
 An object of class "tsco". Among its components, \code{fit_stage1} and
@@ -114,7 +122,8 @@ frequency-weighted sample sizes, and \code{data_stage1}, \code{data_stage2},
 \code{stage1_formula} and \code{stage2_formula} are the stage fitting data and
 formulas, \code{term_labels} holds the terms of \code{formula}, and
 \code{stage1_dropped_terms} names those dropped from stage 1 because a
-predictor was constant below the cutoff. The calls recorded inside \code{fit_stage1} and \code{fit_stage2} are
+predictor was constant below the cutoff, and \code{stage1_degenerate} is
+\code{TRUE} when stage 1 was not fitted at all. The calls recorded inside \code{fit_stage1} and \code{fit_stage2} are
 compacted to save memory, with the data, weights and family replaced by
 placeholders, and are not intended for re-evaluation: \code{update()} or
 similar on a stage fit will fail. Refit through \code{tsco()}, or use the
@@ -136,6 +145,29 @@ The response may be either an individual-level ordinal outcome or a grouped
 count response supplied using cbind(), as in
 cbind(normal, mild, severe) ~ x.
 }
+\section{Degenerate stage 1}{
+
+Stage 1 models Y | Y < C and needs at least two categories below the
+cutoff. With \code{cutoff_level} at the lowest level there are none, and at the
+second level there is one, whose conditional probability is identically 1.
+In both cases the stage-1 likelihood factor is exactly 1 and carries no
+parameters, so the TSCO model coincides with its stage-2 model: a
+proportional-odds (\code{stage2 = "po"}) or multinomial (\code{stage2 = "multinomial"}) model on all K outcome levels. Note that the default is
+\code{stage2 = "multinomial"}, so a degenerate cutoff with default arguments
+fits a baseline-category multinomial logit with a separate slope per
+category, not a proportional-odds model; pass \code{stage2 = "po"} for the
+latter. \code{tsco()} fits that model,
+warns (unless \code{warn_degenerate = FALSE}), and records
+\code{stage1_degenerate = TRUE}; \code{fit_stage1}, \code{data_stage1}, \code{counts_stage1}
+and \code{totals_stage1} are \code{NULL} and \code{stage1_engine} is \code{NA}. All methods
+work: \code{coef()} and \code{vcov()} return stage-2 components only, \code{logLik()} and
+BIC count stage-2 parameters only, joint tests are the stage-2 tests, and
+\code{predict()} returns the stage-2 probabilities with no stage-1 support
+question to settle. This makes the plain PO or multinomial model
+available through the same interface as the two-stage models, for
+comparison across cutoffs.
+}
+
 \section{Predictors constant below the cutoff}{
 
 Stage 1 is fitted only to observations below \code{cutoff_level}. A predictor
