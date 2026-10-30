@@ -738,6 +738,22 @@ tsco <- function(
 
   stage1_intercept_only <- length(attr(stats::terms(stage1_formula), "term.labels")) == 0L
 
+  # Factor predictors whose model-frame name is not syntactic (`test arm`):
+  # rms::orm() cannot fit them, so PO stages containing one go to VGAM.
+  nonsyntactic_factors <- function(d, formula) {
+    # Predictor columns the stage formula actually uses (stage 1 may have
+    # dropped some), by their model-frame names.
+    used <- .tsco_strip_backticks(
+      rownames(attr(stats::terms(formula), "factors"))
+    )
+    cols <- intersect(used, setdiff(names(d), c(".tsco_y_stage1", ".tsco_y_stage2")))
+    cols <- cols[vapply(cols, function(nm) is.factor(d[[nm]]), logical(1L))]
+    cols[make.names(cols) != cols]
+  }
+
+  stage1_nonsyntactic <- nonsyntactic_factors(d1, stage1_formula)
+  stage2_nonsyntactic <- nonsyntactic_factors(d2, stage2_formula)
+
   if (!is.null(w1) && !any(w1 > 0)) {
     stop(
       "`weights` must contain at least one positive value among observations contributing to stage 1.",
@@ -815,13 +831,15 @@ tsco <- function(
     grouped = is_grouped,
     po_engine = po_engine,
     weighted = !is.null(w1),
-    intercept_only = stage1_intercept_only
+    intercept_only = stage1_intercept_only,
+    nonsyntactic_factors = stage1_nonsyntactic
   )
   stage2_engine <- .tsco_stage_engine(
     stage2,
     grouped = is_grouped,
     po_engine = po_engine,
-    weighted = !is.null(w2)
+    weighted = !is.null(w2),
+    nonsyntactic_factors = stage2_nonsyntactic
   )
 
   fit1 <- .tsco_fit_stage(

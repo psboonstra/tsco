@@ -590,6 +590,12 @@
 #' stage-1 formula is not the right source. Older objects without
 #' `term_labels` fall back to the union of the two stage formulas.
 #' @noRd
+#' The user's formula as a terms object, for canonical term matching.
+#' @noRd
+.tsco_user_terms <- function(object) {
+  stats::terms(object$formula)
+}
+
 .tsco_joint_test_terms <- function(object) {
   if (!is.null(object$term_labels)) {
     return(object$term_labels)
@@ -682,20 +688,25 @@
 
   coef_terms <- coef_terms[names(b)]
   term_labels <- .tsco_joint_test_terms(object)
-  test_names <- term_labels[term_labels %in% unique(coef_terms[!is.na(coef_terms)])]
+  user_terms <- .tsco_user_terms(object)
+
+  # Type-II semantics: the term and every term containing it, in either
+  # stage, so the hypothesis is that the term plays no role at all.
+  drop_sets <- lapply(term_labels, function(term) unique(c(
+    .tsco_terms_containing(term, object$stage1_formula, user_terms),
+    .tsco_terms_containing(term, object$stage2_formula, user_terms)
+  )))
+  names(drop_sets) <- term_labels
+
+  has_coef <- vapply(drop_sets, function(d) any(coef_terms %in% d), logical(1L))
+  test_names <- term_labels[has_coef]
 
   if (length(test_names) == 0L) {
     return(data.frame())
   }
 
   res <- lapply(test_names, function(term) {
-    # Type-II semantics: the term and every term containing it, in either
-    # stage, so the hypothesis is that the term plays no role at all.
-    drop_set <- unique(c(
-      .tsco_terms_containing(term, object$stage1_formula),
-      .tsco_terms_containing(term, object$stage2_formula)
-    ))
-    idx <- which(coef_terms %in% drop_set)
+    idx <- which(coef_terms %in% drop_sets[[term]])
 
     b_term <- b[idx]
     V_term <- V[names(b_term), names(b_term), drop = FALSE]
@@ -842,6 +853,25 @@
   )
 }
 
+#' Remove one pair of surrounding backticks from names that carry them.
+#' @noRd
+.tsco_strip_backticks <- function(x) {
+  sub("^`(.*)`$", "\\1", x)
+}
+
+#' Quote model-frame column names for use in a formula.
+#'
+#' `deparse(as.name(x), backtick = TRUE)` leaves syntactic names alone, wraps
+#' non-syntactic ones (`test arm`) in backticks, and escapes backticks that
+#' appear inside a name, as in the column `log(\`my x\`)` that an inline
+#' transformation of a non-syntactic variable produces. Hand-rolled wrapping
+#' got both of those wrong.
+#' @noRd
+.tsco_quote_name <- function(x) {
+  vapply(x, function(v) deparse(as.name(v), backtick = TRUE), character(1L),
+         USE.NAMES = FALSE)
+}
+
 #' Rebuild a formula right-hand side from model-frame column names.
 #'
 #' `tsco()` fits its two stages against data frames whose columns are the
@@ -868,18 +898,27 @@
   labels <- character()
   dropped <- character()
 
+  # A non-syntactic variable such as `test arm` keeps its backticks in the
+  # terms object (labels and `factors` rownames) but not in the model-frame
+  # column name. Strip them before wrapping, or the label becomes ``test arm``
+  # and fails to parse; and compare against `exclude` (model-frame names)
+  # without them.
   if (length(term_labels) > 0L) {
     if (is.null(fac) || length(fac) == 0L || is.null(rownames(fac))) {
-      keep <- !(term_labels %in% exclude)
+      plain <- .tsco_strip_backticks(term_labels)
+      keep <- !(plain %in% exclude)
       dropped <- term_labels[!keep]
-      labels <- paste0("`", term_labels[keep], "`")
+      labels <- .tsco_quote_name(plain[keep])
     } else {
-      term_vars <- lapply(term_labels, function(lab) rownames(fac)[fac[, lab] > 0L])
+      term_vars <- lapply(
+        term_labels,
+        function(lab) .tsco_strip_backticks(rownames(fac)[fac[, lab] > 0L])
+      )
       keep <- !vapply(term_vars, function(v) any(v %in% exclude), logical(1L))
       dropped <- term_labels[!keep]
       labels <- vapply(
         term_vars[keep],
-        function(vars) paste0("`", vars, "`", collapse = ":"),
+        function(vars) paste0(.tsco_quote_name(vars), collapse = ":"),
         character(1L),
         USE.NAMES = FALSE
       )
@@ -922,7 +961,8 @@
 }
 
 .tsco_stage_engine <- function(kind, grouped, po_engine, weighted = FALSE,
-                               intercept_only = FALSE) {
+                               intercept_only = FALSE,
+                               nonsyntactic_factors = character()) {
   if (!identical(kind, "po")) {
     return("vglm")
   }
@@ -932,6 +972,25 @@
   # arises when every predictor is constant among the stage's observations,
   # e.g. a treatment arm with no outcomes below the cutoff.
   if (isTRUE(intercept_only)) {
+    return("vglm")
+  }
+
+  # `rms::orm()` (and `lrm()`) fail with "subscript out of bounds" on a factor
+  # whose name is not syntactic, such as `test arm`: rms's Design bookkeeping
+  # does not match the backticked `model.matrix()` column names. VGAM has no
+  # such trouble. Route such stages to VGAM under "auto"; refuse an explicit
+  # "orm" with the reason rather than letting rms fail opaquely.
+  if (length(nonsyntactic_factors) > 0L) {
+    if (identical(po_engine, "orm")) {
+      stop(
+        "`po_engine = \"orm\"` cannot be used because rms::orm() does not ",
+        "accept factor predictors with non-syntactic names (",
+        paste0("`", nonsyntactic_factors, "`", collapse = ", "),
+        "); rename the variable(s) or use `po_engine = \"vglm\"`.",
+        call. = FALSE
+      )
+    }
+
     return("vglm")
   }
 
@@ -1203,30 +1262,63 @@
 #' @return Character vector of the stage formula's term labels that contain
 #'   `term`; empty if the stage formula does not involve it.
 #' @noRd
-.tsco_terms_containing <- function(term, formula) {
+.tsco_terms_containing <- function(term, formula, user_terms = NULL) {
   tt <- stats::terms(formula)
   labels <- attr(tt, "term.labels")
-  fac <- attr(tt, "factors")
 
   if (length(labels) == 0L) {
     return(character())
   }
 
-  if (!term %in% labels) {
-    return(character())
+  # Variable sets in canonical form, so that the user's label `log(\`my x\`)`
+  # and the stage formula's quoted column name compare equal.
+  stage_vars <- .tsco_term_variables(tt)
+  target <- .tsco_term_variables(
+    if (is.null(user_terms)) tt else user_terms
+  )[[term]]
+
+  if (is.null(target)) {
+    # Not a term of `user_terms` (or of `formula` when none was given).
+    if (!is.null(user_terms) || !term %in% labels) {
+      return(character())
+    }
+    target <- stage_vars[[term]]
   }
 
-  if (is.null(fac) || length(fac) == 0L) {
-    return(term)
+  labels[vapply(stage_vars, function(v) all(target %in% v), logical(1L))]
+}
+
+#' Canonical variable set of every term of a terms object.
+#'
+#' Variable names are taken from the `factors` matrix with surrounding
+#' backticks removed and escaped backticks unescaped, so a user formula's
+#' `log(\`my x\`)` and a stage formula's quoted column `\`log(\\\`my x\\\`)\``
+#' both become `log(\`my x\`)`. Returned as a list named by term label.
+#' @noRd
+.tsco_term_variables <- function(tt) {
+  labels <- attr(tt, "term.labels")
+  fac <- attr(tt, "factors")
+
+  if (length(labels) == 0L) {
+    return(list())
   }
 
-  vars <- rownames(fac)[fac[, term] > 0L]
+  if (is.null(fac) || length(fac) == 0L || is.null(rownames(fac))) {
+    out <- lapply(labels, .tsco_canonical_name)
+  } else {
+    out <- lapply(labels, function(lab) {
+      .tsco_canonical_name(rownames(fac)[fac[, lab] > 0L])
+    })
+  }
 
-  labels[vapply(
-    labels,
-    function(lab) all(fac[vars, lab, drop = FALSE] > 0L),
-    logical(1L)
-  )]
+  names(out) <- labels
+  out
+}
+
+#' Strip one pair of surrounding backticks and unescape interior ones.
+#' @noRd
+.tsco_canonical_name <- function(x) {
+  gsub("\\\\`", "`", .tsco_strip_backticks(x))
 }
 
 .tsco_drop_term_formula <- function(formula, term) {
@@ -1411,6 +1503,7 @@
 
   stage1_terms <- attr(stats::terms(object$stage1_formula), "term.labels")
   stage2_terms <- attr(stats::terms(object$stage2_formula), "term.labels")
+  user_terms <- .tsco_user_terms(object)
 
   # Reduced-model log-likelihood and df for one stage after dropping `term`.
   # Three cases: the term is not in this stage's formula (stage 1 drops
@@ -1421,7 +1514,7 @@
                             weights, stage_args, counts, levels, totals,
                             ll_full, df_full) {
     # Type-II semantics: remove the term and every term containing it.
-    drop_set <- .tsco_terms_containing(term, formula)
+    drop_set <- .tsco_terms_containing(term, formula, user_terms)
 
     if (length(drop_set) == 0L) {
       return(list(loglik = ll_full, df = df_full))

@@ -1,3 +1,17 @@
+# tsco (development version)
+
+- **Bug fix:** a predictor whose name needs backticks (`` `test arm` ``) made
+  `tsco()` fail with "attempt to use zero-length variable name": the stage
+  formulas, rebuilt from model-frame column names, wrapped an already
+  backticked name a second time. Names are now quoted with
+  `deparse(as.name(), backtick = TRUE)`, which also handles backticks inside a
+  transformed column such as `` log(`my x`) ``, and the joint tests match terms
+  by canonical variable set rather than by label, so `` log(`my x`) `` is
+  tested rather than silently given 0 df. Because `rms::orm()` itself cannot
+  fit a factor with a non-syntactic name, PO stages containing one use
+  `VGAM::vglm()` under `po_engine = "auto"`; an explicit `"orm"` is a clear
+  error.
+
 # tsco 0.2.0
 
 - Individual-level data with no observation below `cutoff_level` now stop
