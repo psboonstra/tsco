@@ -27,18 +27,28 @@
 vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   stage <- match.arg(stage)
 
-  V1_raw <- .tsco_stage_vcov(object$fit_stage1)
+  degenerate1 <- isTRUE(object$stage1_degenerate)
+
+  V1_raw <- if (degenerate1) {
+    matrix(numeric(0), 0L, 0L, dimnames = list(character(0), character(0)))
+  } else {
+    .tsco_stage_vcov(object$fit_stage1)
+  }
   V2_raw <- .tsco_stage_vcov(object$fit_stage2)
 
   if (is.null(V1_raw) || is.null(V2_raw)) {
     stop("Could not extract a covariance matrix for each TSCO stage.", call. = FALSE)
   }
 
-  s1 <- .tsco_sign_vector(
-    object$fit_stage1,
-    kind = object$stage1,
-    engine = object$stage1_engine
-  )
+  s1 <- if (degenerate1) {
+    numeric(0)
+  } else {
+    .tsco_sign_vector(
+      object$fit_stage1,
+      kind = object$stage1,
+      engine = object$stage1_engine
+    )
+  }
 
   s2 <- .tsco_sign_vector(
     object$fit_stage2,
@@ -114,9 +124,10 @@ vcov.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
     rn2 <- names(stats::coef(object$fit_stage2))
   }
 
+  # `paste0("stage1:", NULL)` is "stage1:", not character(0).
   rn <- c(
-    paste0("stage1:", rn1),
-    paste0("stage2:", rn2)
+    if (length(rn1)) paste0("stage1:", rn1) else character(0),
+    if (length(rn2)) paste0("stage2:", rn2) else character(0)
   )
 
   dimnames(V) <- list(rn, rn)

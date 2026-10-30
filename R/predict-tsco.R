@@ -33,6 +33,10 @@
 #' returned matrix then carries a logical `unfitted` attribute marking those
 #' rows.
 #'
+#' When stage 1 is degenerate (see [tsco()]), the predictions are those of the
+#' stage-2 model on all outcome levels, no row is unsupported, and
+#' `unsupported_stage1` has no effect.
+#'
 #' A prediction row with a missing or non-finite value in any predictor (for
 #' example `log(x)` at `x = 0`) is likewise returned as all `NA`, with a
 #' warning, and marked in a logical `incomplete` attribute; the remaining rows
@@ -130,6 +134,12 @@ predict.tsco <- function(
   }
 
   fitted_rows <- !unfitted & !incomplete
+
+  if (isTRUE(object$stage1_degenerate)) {
+    return(.tsco_predict_degenerate(
+      object, pred_data, fitted_rows, unfitted, incomplete, type
+    ))
+  }
 
   unsupported <- .tsco_stage1_unsupported_rows(object, pred_data) & fitted_rows
   supported <- !unsupported & fitted_rows
@@ -439,4 +449,96 @@ predict.tsco <- function(
       )
     )
   }
+}
+
+
+#' Predictions when stage 1 is degenerate.
+#'
+#' The model is the stage-2 model on all K levels. With a single lower level
+#' its probability is the stage-2 collapsed-category probability; with none,
+#' the stage-2 probabilities are the answer as they stand. No row can be
+#' stage-1-unsupported, so `unsupported_stage1` plays no role.
+#' @noRd
+.tsco_predict_degenerate <- function(object, pred_data, fitted_rows, unfitted,
+                                     incomplete, type) {
+  n <- nrow(pred_data)
+  K <- length(object$levels)
+  collapsed <- object$collapsed_levels
+  label <- object$lower_collapsed_label
+
+  p2 <- matrix(
+    NA_real_, nrow = n, ncol = length(collapsed),
+    dimnames = list(rownames(pred_data), collapsed)
+  )
+
+  if (any(fitted_rows)) {
+    p2_fitted <- .tsco_predict_stage_prob(
+      object$fit_stage2,
+      engine = object$stage2_engine,
+      newdata = pred_data[fitted_rows, , drop = FALSE],
+      levels = .tsco_stage_levels(object, 2L)
+    )
+    p2_fitted <- .tsco_align_prob(p2_fitted, .tsco_stage_levels(object, 2L))
+    p2_fitted <- .tsco_expand_prob(p2_fitted, .tsco_stage_levels(object, 2L), collapsed)
+
+    if (nrow(p2_fitted) != sum(fitted_rows)) {
+      stop("Stage 2 prediction returned an unexpected number of rows.", call. = FALSE)
+    }
+
+    p2[fitted_rows, ] <- p2_fitted
+  }
+
+  prob <- matrix(
+    NA_real_, nrow = n, ncol = K,
+    dimnames = list(rownames(pred_data), object$levels)
+  )
+
+  if (is.null(label)) {
+    prob[, object$levels] <- p2[, object$levels, drop = FALSE]
+    lower_mass <- rep(0, n)
+  } else {
+    prob[, object$lower_levels] <- p2[, label]
+    prob[, object$upper_levels] <- p2[, object$upper_levels, drop = FALSE]
+    lower_mass <- as.numeric(p2[, label])
+  }
+
+  unsupported <- rep(FALSE, n)
+
+  attr(prob, "unsupported_stage1") <- unsupported
+  attr(prob, "unsupported_stage1_method") <- NA_character_
+  attr(prob, "lower_mass") <- lower_mass
+  if (any(unfitted)) attr(prob, "unfitted") <- unfitted
+  if (any(incomplete)) attr(prob, "incomplete") <- incomplete
+
+  if (type %in% c("prob", "response")) {
+    return(prob)
+  }
+
+  if (type == "class") {
+    cls <- rep(NA_character_, n)
+    ok <- stats::complete.cases(prob)
+    if (any(ok)) {
+      cls[ok] <- object$levels[max.col(prob[ok, , drop = FALSE], ties.method = "first")]
+    }
+    return(factor(cls, levels = object$levels, ordered = TRUE))
+  }
+
+  # type == "stage": the stage-1 conditional probabilities are degenerate.
+  p1 <- matrix(
+    if (length(object$lower_levels) == 0L) numeric(0) else 1,
+    nrow = n, ncol = length(object$lower_levels),
+    dimnames = list(rownames(pred_data), object$lower_levels)
+  )
+  p1[!fitted_rows, ] <- NA_real_
+
+  list(
+    stage1_conditional = p1,
+    stage2_collapsed = p2,
+    prob = prob,
+    lower_mass = lower_mass,
+    unsupported_stage1 = unsupported,
+    unsupported_stage1_method = NA_character_,
+    unfitted = unfitted,
+    incomplete = incomplete
+  )
 }

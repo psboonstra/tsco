@@ -74,13 +74,18 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
     none = data.frame()
   )
 
+  degenerate1 <- isTRUE(object$stage1_degenerate)
+
   ll1 <- as.numeric(object$logLik_stage1)
   ll2 <- as.numeric(object$logLik_stage2)
 
   df1 <- .tsco_df(object$fit_stage1)
   df2 <- .tsco_df(object$fit_stage2)
 
-  aic1 <- if (is.finite(ll1) && is.finite(df1)) -2 * ll1 + 2 * df1 else NA_real_
+  # A degenerate stage 1 has log-likelihood 0 and no parameters; its
+  # component statistics are not meaningful and are reported as NA, while the
+  # combined statistics (which it contributes nothing to) are unaffected.
+  aic1 <- if (!degenerate1 && is.finite(ll1) && is.finite(df1)) -2 * ll1 + 2 * df1 else NA_real_
   aic2 <- if (is.finite(ll2) && is.finite(df2)) -2 * ll2 + 2 * df2 else NA_real_
 
   # BIC uses the frequency-weighted sample sizes, which equal the unweighted
@@ -92,7 +97,7 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
     object$n_stage1_weighted
   }
 
-  bic1 <- if (is.finite(ll1) && is.finite(df1)) {
+  bic1 <- if (!degenerate1 && is.finite(ll1) && is.finite(df1) && n1_w > 0) {
     -2 * ll1 + log(n1_w) * df1
   } else {
     NA_real_
@@ -107,14 +112,13 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
   component_fit <- data.frame(
     stage = c("Stage 1", "Stage 2"),
     model = c(
-      .tsco_model_label(object$stage1),
+      if (degenerate1) "degenerate" else .tsco_model_label(object$stage1),
       .tsco_model_label(object$stage2)
     ),
     engine = c(object$stage1_engine, object$stage2_engine),
     outcome = c(
       paste0("Y | Y < ", object$cutoff_level),
-      paste0("{Y < ", object$cutoff_level, ", ",
-             paste(object$upper_levels, collapse = ", "), "}")
+      .tsco_stage2_outcome_label(object$cutoff_level, object$upper_levels, object$lower_levels)
     ),
     n_obs = c(object$n_stage1_obs, object$n_obs),
     n_weighted = c(n1_w, n_w),
@@ -157,6 +161,8 @@ summary.tsco <- function(object, joint_test = c("LRT", "Wald", "none"), ...) {
     stage1_engine = object$stage1_engine,
     stage2_engine = object$stage2_engine,
     stage1_label = .tsco_model_label(object$stage1),
+    stage1_degenerate = degenerate1,
+    lower_levels = object$lower_levels,
     stage2_label = .tsco_model_label(object$stage2),
     n = object$n_obs,
     n_obs = object$n_obs,
@@ -231,15 +237,25 @@ print.summary.tsco <- function(
   cat("Upper partition: ", paste(x$upper_levels, collapse = ", "), "\n", sep = "")
 
   cat("\nModel structure:\n")
+  if (isTRUE(x$stage1_degenerate)) {
+    cat(
+      "  Stage 1: Y | Y < ", x$cutoff_level, " is degenerate (",
+      if (length(x$lower_levels) == 0L) "no categories" else "a single category",
+      " below the cutoff) and was not fitted; the model is the\n",
+      "  stage-2 model alone.\n",
+      sep = ""
+    )
+  } else {
+    cat(
+      "  Stage 1: Y | Y < ", x$cutoff_level,
+      " using ", x$stage1_label, " [", x$stage1_engine, "]\n",
+      sep = ""
+    )
+  }
   cat(
-    "  Stage 1: Y | Y < ", x$cutoff_level,
-    " using ", x$stage1_label, " [", x$stage1_engine, "]\n",
-    sep = ""
-  )
-  cat(
-    "  Stage 2: collapsed outcome {Y < ", x$cutoff_level, ", ",
-    paste(x$upper_levels, collapse = ", "),
-    "} using ", x$stage2_label, " [", x$stage2_engine, "]\n",
+    "  Stage 2: ", if (length(x$lower_levels) == 0L) "outcome " else "collapsed outcome ",
+    .tsco_stage2_outcome_label(x$cutoff_level, x$upper_levels, x$lower_levels),
+    " using ", x$stage2_label, " [", x$stage2_engine, "]\n",
     sep = ""
   )
 
@@ -329,6 +345,10 @@ print.summary.tsco <- function(
 
   cat("\nStage 1 coefficients: ")
   cat("Y | Y < ", x$cutoff_level, "\n", sep = "")
+
+  if (isTRUE(x$stage1_degenerate)) {
+    cat("  Degenerate stage; no parameters.\n")
+  } else {
   cat(.tsco_scale_legend(x$stage1), sep = "")
   if (identical(x$stage1, "multinomial")) {
     cat(
@@ -338,7 +358,6 @@ print.summary.tsco <- function(
       sep = ""
     )
   }
-
 
   if (length(x$coef_stage1) == 0L) {
     cat("  No coefficient table available.\n")
@@ -351,15 +370,17 @@ print.summary.tsco <- function(
       ...
     )
   }
+  }
 
   cat("\nStage 2 coefficients: ")
-  cat("collapsed outcome {Y < ", x$cutoff_level, ", ",
-      paste(x$upper_levels, collapse = ", "), "}\n", sep = "")
+  cat(if (length(x$lower_levels) == 0L) "outcome " else "collapsed outcome ",
+      .tsco_stage2_outcome_label(x$cutoff_level, x$upper_levels, x$lower_levels),
+      "\n", sep = "")
   cat(.tsco_scale_legend(x$stage2), sep = "")
   if (identical(x$stage2, "multinomial")) {
     cat(
-      "Reference category: Y < ",
-      x$cutoff_level,
+      "Reference category: ",
+      if (length(x$lower_levels) == 0L) paste0("Y = ", x$upper_levels[1]) else paste0("Y < ", x$cutoff_level),
       "\n",
       sep = ""
     )

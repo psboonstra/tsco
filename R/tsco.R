@@ -27,7 +27,11 @@
 #'   with `relevel()` instead.
 #' @param data A data.frame.
 #' @param cutoff_level The first outcome level in the upper partition, supplied
-#'   as a level label.
+#'   as a level label. Any outcome level is accepted. With the lowest or the
+#'   second level, stage 1 has fewer than two categories and is degenerate:
+#'   only the stage-2 model is fitted, which is then an ordinary
+#'   proportional-odds or multinomial model on all outcome levels (see the
+#'   section on degenerate stages).
 #' @param levels Optional character vector specifying the ordinal outcome level
 #'   order. For individual-level data, observed outcome values must be contained
 #'   in `levels`. For grouped count data with named cbind() columns, `levels`
@@ -35,7 +39,8 @@
 #'   columns into ordinal order. For grouped count data without column names,
 #'   `levels` is assumed to describe the existing cbind() column order.
 #' @param stage1 Model for the conditional lower partition Y | Y < C.
-#'   Either "po" for proportional odds or "multinomial".
+#'   Either "po" for proportional odds or "multinomial". Ignored when stage 1
+#'   is degenerate.
 #' @param stage2 Model for the collapsed marginal outcome formed by combining
 #'   all levels below the cutoff with C, ..., K - 1. Either "multinomial" or
 #'   "po".
@@ -85,8 +90,29 @@
 #'   non-finite predictor or a missing response that survive it are an error.
 #'   Weights of length `nrow(data)` are passed through `model.frame()` with the
 #'   data, so they stay aligned under any such function.
-#' @param warn_degenerate If TRUE, warn when K = 3, which reduces to two binary
-#'   regressions.
+#' @param warn_degenerate If TRUE (the default), warn when the model
+#'   degenerates: when K = 3, so that both stages are binary regressions and
+#'   the PO/multinomial choice is immaterial, and when `cutoff_level` leaves
+#'   fewer than two categories below it, so that stage 1 is not fitted. Set to
+#'   FALSE in simulation code that sweeps over cutoffs.
+#'
+#' @section Degenerate stage 1:
+#' Stage 1 models Y | Y < C and needs at least two categories below the
+#' cutoff. With `cutoff_level` at the lowest level there are none, and at the
+#' second level there is one, whose conditional probability is identically 1.
+#' In both cases the stage-1 likelihood factor is exactly 1 and carries no
+#' parameters, so the TSCO model coincides with its stage-2 model: a
+#' proportional-odds (`stage2 = "po"`) or multinomial (`stage2 =
+#' "multinomial"`) model on all K outcome levels. `tsco()` fits that model,
+#' warns (unless `warn_degenerate = FALSE`), and records
+#' `stage1_degenerate = TRUE`; `fit_stage1`, `data_stage1`, `counts_stage1`
+#' and `totals_stage1` are `NULL` and `stage1_engine` is `NA`. All methods
+#' work: `coef()` and `vcov()` return stage-2 components only, `logLik()` and
+#' BIC count stage-2 parameters only, joint tests are the stage-2 tests, and
+#' `predict()` returns the stage-2 probabilities with no stage-1 support
+#' question to settle. This makes the plain PO or multinomial model
+#' available through the same interface as the two-stage models, for
+#' comparison across cutoffs.
 #'
 #' @section Predictors constant below the cutoff:
 #' Stage 1 is fitted only to observations below `cutoff_level`. A predictor
@@ -123,7 +149,8 @@
 #'   `stage1_formula` and `stage2_formula` are the stage fitting data and
 #'   formulas, `term_labels` holds the terms of `formula`, and
 #'   `stage1_dropped_terms` names those dropped from stage 1 because a
-#'   predictor was constant below the cutoff. The calls recorded inside `fit_stage1` and `fit_stage2` are
+#'   predictor was constant below the cutoff, and `stage1_degenerate` is
+#'   `TRUE` when stage 1 was not fitted at all. The calls recorded inside `fit_stage1` and `fit_stage2` are
 #'   compacted to save memory, with the data, weights and family replaced by
 #'   placeholders, and are not intended for re-evaluation: `update()` or
 #'   similar on a stage fit will fail. Refit through `tsco()`, or use the
@@ -466,27 +493,47 @@ tsco <- function(
   lower_levels <- y_levels[seq_len(cutoff_index - 1L)]
   upper_levels <- y_levels[cutoff_index:K]
 
-  if (length(lower_levels) < 2L) {
-    stop(
-      "Stage 1 requires at least two categories below `cutoff_level`.",
+  # --------------------------------------------------------------------------
+  # A degenerate stage 1.
+  #
+  # With the cutoff at the lowest level there is nothing below it; with the
+  # cutoff at the second level there is a single category, whose conditional
+  # probability Pr(Y = y_0 | Y < C, x) is identically 1. Either way the
+  # stage-1 likelihood factor is 1, contributes no parameters, and the TSCO
+  # model is the stage-2 model alone: an ordinary proportional-odds or
+  # multinomial model on all K outcome levels. That model is fitted, and
+  # stage 1 is recorded as degenerate rather than fitted.
+  # --------------------------------------------------------------------------
+
+  stage1_degenerate <- length(lower_levels) < 2L
+
+  if (stage1_degenerate && isTRUE(warn_degenerate)) {
+    warning(
+      "`cutoff_level` = \"", cutoff_level, "\" is the ",
+      if (length(lower_levels) == 0L) "lowest" else "second",
+      " outcome level, so stage 1 (Y | Y < ", cutoff_level, ") has ",
+      if (length(lower_levels) == 0L) "no categories" else "a single category",
+      " and is degenerate. Only the stage-2 model is fitted, which is an ",
+      "ordinary ", .tsco_model_label(stage2), " model on all ", K,
+      " outcome levels; `stage1` has no effect.",
       call. = FALSE
     )
   }
 
-  if (length(upper_levels) < 1L) {
-    stop(
-      "`cutoff_level` must leave at least one category in the upper partition.",
-      call. = FALSE
-    )
-  }
+  # Create a unique dummy label for the collapsed lower outcome. With nothing
+  # below the cutoff there is nothing to collapse and stage 2 is fitted to the
+  # outcome as is.
+  if (length(lower_levels) == 0L) {
+    lower_collapsed_label <- NULL
+    collapsed_levels <- upper_levels
+  } else {
+    lower_collapsed_label <- paste0(".Y_lt_", make.names(y_levels[cutoff_index]))
+    while (lower_collapsed_label %in% y_levels) {
+      lower_collapsed_label <- paste0(".", lower_collapsed_label)
+    }
 
-  # Create a unique dummy label for the collapsed lower outcome.
-  lower_collapsed_label <- paste0(".Y_lt_", make.names(y_levels[cutoff_index]))
-  while (lower_collapsed_label %in% y_levels) {
-    lower_collapsed_label <- paste0(".", lower_collapsed_label)
+    collapsed_levels <- c(lower_collapsed_label, upper_levels)
   }
-
-  collapsed_levels <- c(lower_collapsed_label, upper_levels)
 
   # Align weights with the model frame.
   if (!is.null(weights)) {
@@ -602,34 +649,43 @@ tsco <- function(
     # likelihood, so remove them.
     has_lower <- lower_total > 0
 
-    if (!any(has_lower)) {
-      stop(
-        "No grouped/count rows have positive counts below `cutoff_level`; stage 1 cannot be fit.",
-        call. = FALSE
-      )
+    if (stage1_degenerate) {
+      d1 <- NULL
+      y1_counts <- NULL
+      w1 <- NULL
+    } else {
+      if (!any(has_lower)) {
+        stop(
+          "No grouped/count rows have positive counts below `cutoff_level`; stage 1 cannot be fit.",
+          call. = FALSE
+        )
+      }
+
+      d1 <- cov_mf[has_lower, , drop = FALSE]
+
+      y1_mat <- lower_counts[has_lower, , drop = FALSE]
+      colnames(y1_mat) <- lower_levels
+
+      d1$.tsco_y_stage1 <- I(y1_mat)
+      y1_counts <- y1_mat
+      w1 <- if (is.null(w_all)) NULL else w_all[has_lower]
     }
-
-    d1 <- cov_mf[has_lower, , drop = FALSE]
-
-    y1_mat <- lower_counts[has_lower, , drop = FALSE]
-    colnames(y1_mat) <- lower_levels
-
-    d1$.tsco_y_stage1 <- I(y1_mat)
 
     # Stage 2: collapsed marginal model {Y < C, C, ..., K - 1}.
     d2 <- cov_mf
 
-    y2_mat <- cbind(lower_total, upper_counts)
+    y2_mat <- if (length(lower_levels) == 0L) {
+      upper_counts
+    } else {
+      cbind(lower_total, upper_counts)
+    }
     colnames(y2_mat) <- collapsed_levels
 
     d2$.tsco_y_stage2 <- I(y2_mat)
-
-    y1_counts <- y1_mat
     y2_counts <- y2_mat
 
     stage2_formula <- make_stage_formula(".tsco_y_stage2")
 
-    w1 <- if (is.null(w_all)) NULL else w_all[has_lower]
     w2 <- w_all
 
   } else {
@@ -637,41 +693,49 @@ tsco <- function(
 
     is_lower <- y_chr %in% lower_levels
 
-    if (!any(is_lower)) {
-      stop(
-        "No observations fall below `cutoff_level`; stage 1 cannot be fit. ",
-        "Choose a lower `cutoff_level`.",
-        call. = FALSE
-      )
-    }
-
     n_groups <- nrow(mf)
     n_obs <- nrow(mf)
     n_stage1_groups <- sum(is_lower)
     n_stage1_obs <- sum(is_lower)
 
-    d1 <- cov_mf[is_lower, , drop = FALSE]
-
-    if (stage1 == "po") {
-      d1$.tsco_y_stage1 <- ordered(y_chr[is_lower], levels = lower_levels)
+    if (stage1_degenerate) {
+      d1 <- NULL
+      y1_counts <- NULL
+      w1 <- NULL
     } else {
-      d1$.tsco_y_stage1 <- factor(y_chr[is_lower], levels = lower_levels)
+      if (!any(is_lower)) {
+        stop(
+          "No observations fall below `cutoff_level`; stage 1 cannot be fit. ",
+          "Choose a lower `cutoff_level`.",
+          call. = FALSE
+        )
+      }
+
+      d1 <- cov_mf[is_lower, , drop = FALSE]
+
+      if (stage1 == "po") {
+        d1$.tsco_y_stage1 <- ordered(y_chr[is_lower], levels = lower_levels)
+      } else {
+        d1$.tsco_y_stage1 <- factor(y_chr[is_lower], levels = lower_levels)
+      }
+
+      y1_counts <- .tsco_factor_to_counts(d1$.tsco_y_stage1, levels = lower_levels)
+      w1 <- if (is.null(w_all)) NULL else w_all[is_lower]
     }
 
     d2 <- cov_mf
 
-    y2_chr <- ifelse(y_chr %in% lower_levels, lower_collapsed_label, y_chr)
+    y2_chr <- if (length(lower_levels) == 0L) {
+      y_chr
+    } else {
+      ifelse(y_chr %in% lower_levels, lower_collapsed_label, y_chr)
+    }
 
     if (stage2 == "po") {
       d2$.tsco_y_stage2 <- ordered(y2_chr, levels = collapsed_levels)
     } else {
       d2$.tsco_y_stage2 <- factor(y2_chr, levels = collapsed_levels)
     }
-
-    y1_counts <- .tsco_factor_to_counts(
-      d1$.tsco_y_stage1,
-      levels = lower_levels
-    )
 
     y2_counts <- .tsco_factor_to_counts(
       d2$.tsco_y_stage2,
@@ -680,7 +744,6 @@ tsco <- function(
 
     stage2_formula <- make_stage_formula(".tsco_y_stage2")
 
-    w1 <- if (is.null(w_all)) NULL else w_all[is_lower]
     w2 <- w_all
   }
 
@@ -718,10 +781,16 @@ tsco <- function(
     vapply(stage1_predictor_cols, function(nm) .tsco_is_constant_column(d1[[nm]]), logical(1L))
   ]
 
-  stage1_formula <- make_stage_formula(".tsco_y_stage1", exclude = stage1_constant)
-  stage1_dropped_terms <- attr(
-    .tsco_stage_rhs_labels(tt, exclude = stage1_constant), "dropped"
-  )
+  stage1_formula <- if (stage1_degenerate) {
+    NULL
+  } else {
+    make_stage_formula(".tsco_y_stage1", exclude = stage1_constant)
+  }
+  stage1_dropped_terms <- if (stage1_degenerate) {
+    character()
+  } else {
+    attr(.tsco_stage_rhs_labels(tt, exclude = stage1_constant), "dropped")
+  }
 
   if (length(stage1_dropped_terms) > 0L) {
     warning(
@@ -736,7 +805,8 @@ tsco <- function(
     )
   }
 
-  stage1_intercept_only <- length(attr(stats::terms(stage1_formula), "term.labels")) == 0L
+  stage1_intercept_only <- !stage1_degenerate &&
+    length(attr(stats::terms(stage1_formula), "term.labels")) == 0L
 
   # Factor predictors whose model-frame name is not syntactic (`test arm`):
   # rms::orm() cannot fit them, so PO stages containing one go to VGAM.
@@ -751,7 +821,7 @@ tsco <- function(
     cols[make.names(cols) != cols]
   }
 
-  stage1_nonsyntactic <- nonsyntactic_factors(d1, stage1_formula)
+  stage1_nonsyntactic <- if (stage1_degenerate) character() else nonsyntactic_factors(d1, stage1_formula)
   stage2_nonsyntactic <- nonsyntactic_factors(d2, stage2_formula)
 
   if (!is.null(w1) && !any(w1 > 0)) {
@@ -784,6 +854,11 @@ tsco <- function(
 
   names(stage1_factor_levels) <- factor_predictors
 
+  if (stage1_degenerate) {
+    # Pr(Y = y_0 | Y < C, x) is 1 for every x: nothing is unsupported.
+    stage1_factor_levels <- predictor_observed_levels
+  }
+
   # --------------------------------------------------------------------------
   # Declared-but-unobserved outcome levels.
   #
@@ -795,11 +870,17 @@ tsco <- function(
   # declared set for reporting, and restore them at zero mass in `predict()`.
   # --------------------------------------------------------------------------
 
-  stage1_drop <- .tsco_drop_unobserved_levels(
-    if (is_grouped) y1_counts else d1$.tsco_y_stage1,
-    levels = lower_levels,
-    stage_label = paste0("Stage 1 (Y | Y < ", cutoff_level, ")")
-  )
+  stage1_drop <- if (stage1_degenerate) {
+    # Nothing is fitted in stage 1; its (at most one) level is observed iff
+    # the collapsed category has observations, which stage 2 checks.
+    list(y = NULL, observed = lower_levels, dropped = character())
+  } else {
+    .tsco_drop_unobserved_levels(
+      if (is_grouped) y1_counts else d1$.tsco_y_stage1,
+      levels = lower_levels,
+      stage_label = paste0("Stage 1 (Y | Y < ", cutoff_level, ")")
+    )
+  }
 
   stage2_drop <- .tsco_drop_unobserved_levels(
     if (is_grouped) y2_counts else d2$.tsco_y_stage2,
@@ -811,14 +892,16 @@ tsco <- function(
   stage2_observed_levels <- stage2_drop$observed
 
   if (is_grouped) {
-    d1$.tsco_y_stage1 <- I(stage1_drop$y)
+    if (!stage1_degenerate) d1$.tsco_y_stage1 <- I(stage1_drop$y)
     d2$.tsco_y_stage2 <- I(stage2_drop$y)
   } else {
-    d1$.tsco_y_stage1 <- stage1_drop$y
+    if (!stage1_degenerate) d1$.tsco_y_stage1 <- stage1_drop$y
     d2$.tsco_y_stage2 <- stage2_drop$y
   }
 
-  y1_counts <- y1_counts[, stage1_observed_levels, drop = FALSE]
+  if (!stage1_degenerate) {
+    y1_counts <- y1_counts[, stage1_observed_levels, drop = FALSE]
+  }
   y2_counts <- y2_counts[, stage2_observed_levels, drop = FALSE]
 
   # --------------------------------------------------------------------------
@@ -826,14 +909,18 @@ tsco <- function(
   # individual-level proportional-odds stages. All other stages use VGAM.
   # --------------------------------------------------------------------------
 
-  stage1_engine <- .tsco_stage_engine(
-    stage1,
-    grouped = is_grouped,
-    po_engine = po_engine,
-    weighted = !is.null(w1),
-    intercept_only = stage1_intercept_only,
-    nonsyntactic_factors = stage1_nonsyntactic
-  )
+  stage1_engine <- if (stage1_degenerate) {
+    NA_character_
+  } else {
+    .tsco_stage_engine(
+      stage1,
+      grouped = is_grouped,
+      po_engine = po_engine,
+      weighted = !is.null(w1),
+      intercept_only = stage1_intercept_only,
+      nonsyntactic_factors = stage1_nonsyntactic
+    )
+  }
   stage2_engine <- .tsco_stage_engine(
     stage2,
     grouped = is_grouped,
@@ -842,14 +929,18 @@ tsco <- function(
     nonsyntactic_factors = stage2_nonsyntactic
   )
 
-  fit1 <- .tsco_fit_stage(
-    formula = stage1_formula,
-    kind = stage1,
-    engine = stage1_engine,
-    data = d1,
-    weights = w1,
-    stage_args = stage1_args
-  )
+  fit1 <- if (stage1_degenerate) {
+    NULL
+  } else {
+    .tsco_fit_stage(
+      formula = stage1_formula,
+      kind = stage1,
+      engine = stage1_engine,
+      data = d1,
+      weights = w1,
+      stage_args = stage1_args
+    )
+  }
 
   fit2 <- .tsco_fit_stage(
     formula = stage2_formula,
@@ -860,12 +951,16 @@ tsco <- function(
     stage_args = stage2_args
   )
 
-  p1_hat <- .tsco_predict_stage_prob(
-    fit1,
-    engine = stage1_engine,
-    newdata = d1,
-    levels = stage1_observed_levels
-  )
+  p1_hat <- if (stage1_degenerate) {
+    NULL
+  } else {
+    .tsco_predict_stage_prob(
+      fit1,
+      engine = stage1_engine,
+      newdata = d1,
+      levels = stage1_observed_levels
+    )
+  }
   p2_hat <- .tsco_predict_stage_prob(
     fit2,
     engine = stage2_engine,
@@ -875,10 +970,14 @@ tsco <- function(
 
   # Aligned and scored on the observed levels: an unobserved level contributes
   # no counts and zero probability, so it adds nothing to the log-likelihood.
-  p1_hat <- .tsco_align_prob(p1_hat, stage1_observed_levels)
+  if (!stage1_degenerate) {
+    p1_hat <- .tsco_align_prob(p1_hat, stage1_observed_levels)
+  }
   p2_hat <- .tsco_align_prob(p2_hat, stage2_observed_levels)
 
-  if (!is.null(w1)) {
+  if (stage1_degenerate) {
+    y1_counts_ll <- NULL
+  } else if (!is.null(w1)) {
     y1_counts_ll <- y1_counts * as.numeric(w1)
   } else {
     y1_counts_ll <- y1_counts
@@ -890,7 +989,8 @@ tsco <- function(
     y2_counts_ll <- y2_counts
   }
 
-  logLik_stage1 <- .tsco_count_loglik(y1_counts_ll, p1_hat)
+  # A degenerate stage 1 has likelihood factor exactly 1.
+  logLik_stage1 <- if (stage1_degenerate) 0 else .tsco_count_loglik(y1_counts_ll, p1_hat)
   logLik_stage2 <- .tsco_count_loglik(y2_counts_ll, p2_hat)
   logLik_total <- logLik_stage1 + logLik_stage2
 
@@ -903,7 +1003,14 @@ tsco <- function(
   # survey weights are out of scope (nothing here is design-based).
   weighted <- !is.null(w_all)
   n_weighted <- sum(y2_counts_ll)
-  n_stage1_weighted <- sum(y1_counts_ll)
+  n_stage1_weighted <- if (!stage1_degenerate) {
+    sum(y1_counts_ll)
+  } else if (!is.null(lower_collapsed_label) &&
+             lower_collapsed_label %in% colnames(y2_counts_ll)) {
+    sum(y2_counts_ll[, lower_collapsed_label])
+  } else {
+    0
+  }
 
   out <- list(
     call = match.call(),
@@ -913,6 +1020,10 @@ tsco <- function(
     # Terms of the user's formula, and those stage 1 could not estimate.
     term_labels = attr(tt, "term.labels"),
     stage1_dropped_terms = stage1_dropped_terms,
+    # TRUE when the cutoff leaves fewer than two categories below it, so only
+    # stage 2 was fitted; `fit_stage1`, `data_stage1`, `counts_stage1` and
+    # `totals_stage1` are then NULL and `stage1_engine` is NA.
+    stage1_degenerate = stage1_degenerate,
     stage1 = stage1,
     stage2 = stage2,
     cutoff_level = cutoff_level,
@@ -952,7 +1063,7 @@ tsco <- function(
     # column totals give the closed-form intercept-only fit.
     counts_stage1 = y1_counts_ll,
     counts_stage2 = y2_counts_ll,
-    totals_stage1 = colSums(y1_counts_ll),
+    totals_stage1 = if (stage1_degenerate) NULL else colSums(y1_counts_ll),
     totals_stage2 = colSums(y2_counts_ll),
     stage1_args = stage1_args,
     stage2_args = stage2_args,

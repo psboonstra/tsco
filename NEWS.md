@@ -1,5 +1,19 @@
 # tsco (development version)
 
+- **New:** `cutoff_level` may be the lowest or the second outcome level. Stage
+  1 then has fewer than two categories and is degenerate -- its likelihood
+  factor is exactly 1 -- so only the stage-2 model is fitted, which is an
+  ordinary proportional-odds or multinomial model on all outcome levels. This
+  puts the single-stage benchmark behind the same interface as the two-stage
+  models. `tsco()` warns unless `warn_degenerate = FALSE` (whose documented
+  meaning now covers this case as well as K = 3) and records
+  `stage1_degenerate = TRUE`; `fit_stage1` and the other stage-1 components
+  are `NULL`. `coef()`, `vcov()`, `logLik()`, `nobs()`, `summary()`,
+  `print()`, `predict()` and both joint tests handle the degenerate stage, and
+  the result matches a direct `VGAM::vglm()`/`rms::orm()` fit. Previously such
+  a cutoff was an error ("Stage 1 requires at least two categories below
+  `cutoff_level`"), which also made the "`cutoff_level` must be one of the
+  outcome levels" message inaccurate.
 - **Bug fix:** a predictor whose name needs backticks (`` `test arm` ``) made
   `tsco()` fail with "attempt to use zero-length variable name": the stage
   formulas, rebuilt from model-frame column names, wrapped an already

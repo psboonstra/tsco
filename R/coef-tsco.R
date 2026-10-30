@@ -31,14 +31,7 @@
 coef.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
   stage <- match.arg(stage)
 
-  b1_raw <- stats::coef(object$fit_stage1)
   b2_raw <- stats::coef(object$fit_stage2)
-
-  s1 <- .tsco_sign_vector(
-    object$fit_stage1,
-    kind = object$stage1,
-    engine = object$stage1_engine
-  )
 
   s2 <- .tsco_sign_vector(
     object$fit_stage2,
@@ -46,22 +39,36 @@ coef.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
     engine = object$stage2_engine
   )
 
-  b1 <- b1_raw * s1
   b2 <- b2_raw * s2
 
-  names(b1) <- .tsco_apply_reported_names(
-    names(b1_raw),
-    .tsco_stage_reported_names(
+  if (isTRUE(object$stage1_degenerate)) {
+    # A degenerate stage 1 has no parameters.
+    b1 <- stats::setNames(numeric(0), character(0))
+  } else {
+    b1_raw <- stats::coef(object$fit_stage1)
+
+    s1 <- .tsco_sign_vector(
       object$fit_stage1,
       kind = object$stage1,
-      engine = object$stage1_engine,
-      response_levels = .tsco_stage_levels(object, 1L),
-      formula = object$stage1_formula,
-      data = object$data_stage1,
-      collapsed_label = object$lower_collapsed_label,
-      cutoff_level = object$cutoff_level
+      engine = object$stage1_engine
     )
-  )
+
+    b1 <- b1_raw * s1
+
+    names(b1) <- .tsco_apply_reported_names(
+      names(b1_raw),
+      .tsco_stage_reported_names(
+        object$fit_stage1,
+        kind = object$stage1,
+        engine = object$stage1_engine,
+        response_levels = .tsco_stage_levels(object, 1L),
+        formula = object$stage1_formula,
+        data = object$data_stage1,
+        collapsed_label = object$lower_collapsed_label,
+        cutoff_level = object$cutoff_level
+      )
+    )
+  }
 
   names(b2) <- .tsco_apply_reported_names(
     names(b2_raw),
@@ -85,7 +92,9 @@ coef.tsco <- function(object, stage = c("both", "stage1", "stage2"), ...) {
     return(b2)
   }
 
-  names(b1) <- paste0("stage1:", names(b1))
+  if (length(b1) > 0L) {
+    names(b1) <- paste0("stage1:", names(b1))
+  }
   names(b2) <- paste0("stage2:", names(b2))
 
   c(b1, b2)

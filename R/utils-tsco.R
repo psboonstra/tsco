@@ -7,6 +7,11 @@
 }
 
 .tsco_df <- function(fit) {
+  # A degenerate (unfitted) stage has no parameters.
+  if (is.null(fit)) {
+    return(0)
+  }
+
   valid_df <- function(x) {
     is.numeric(x) && length(x) == 1L && is.finite(x) && x >= 0
   }
@@ -208,6 +213,17 @@
     engine = engine,
     reported_names = reported_names
   )
+}
+
+#' Describe the stage-2 outcome: `{Y < C, C, ...}` or, with nothing below
+#' the cutoff, just the outcome levels.
+#' @noRd
+.tsco_stage2_outcome_label <- function(cutoff_level, upper_levels, lower_levels) {
+  if (length(lower_levels) == 0L) {
+    paste0("{", paste(upper_levels, collapse = ", "), "}")
+  } else {
+    paste0("{Y < ", cutoff_level, ", ", paste(upper_levels, collapse = ", "), "}")
+  }
 }
 
 .tsco_model_label <- function(x) {
@@ -639,7 +655,7 @@
   }
 
   coef_terms <- c(
-    .tsco_stage_coef_terms(
+    if (isTRUE(object$stage1_degenerate)) NULL else .tsco_stage_coef_terms(
       fit = object$fit_stage1,
       formula = object$stage1_formula,
       data = object$data_stage1,
@@ -1263,6 +1279,10 @@
 #'   `term`; empty if the stage formula does not involve it.
 #' @noRd
 .tsco_terms_containing <- function(term, formula, user_terms = NULL) {
+  if (is.null(formula)) {
+    return(character())
+  }
+
   tt <- stats::terms(formula)
   labels <- attr(tt, "term.labels")
 
@@ -1427,7 +1447,9 @@
 }
 
 .tsco_joint_lrt_tests <- function(object) {
-  if (is.null(object$data_stage1) ||
+  degenerate1 <- isTRUE(object$stage1_degenerate)
+
+  if ((!degenerate1 && is.null(object$data_stage1)) ||
       is.null(object$data_stage2) ||
       is.null(object$weights_stage1) && !("weights_stage1" %in% names(object)) ||
       is.null(object$weights_stage2) && !("weights_stage2" %in% names(object))) {
@@ -1476,7 +1498,7 @@
     )
   }
 
-  if (is.null(object$counts_stage1) || is.null(object$counts_stage2)) {
+  if ((!degenerate1 && is.null(object$counts_stage1)) || is.null(object$counts_stage2)) {
     stop(
       "Joint LRTs require the stage count matrices stored in the tsco object.",
       call. = FALSE
@@ -1501,7 +1523,12 @@
   stage1_args <- object$stage1_args
   stage2_args <- object$stage2_args
 
-  stage1_terms <- attr(stats::terms(object$stage1_formula), "term.labels")
+  # A degenerate stage 1 has no formula and contributes nothing to any test.
+  stage1_terms <- if (degenerate1) {
+    character()
+  } else {
+    attr(stats::terms(object$stage1_formula), "term.labels")
+  }
   stage2_terms <- attr(stats::terms(object$stage2_formula), "term.labels")
   user_terms <- .tsco_user_terms(object)
 
@@ -1513,6 +1540,10 @@
   stage_reduced <- function(term, stage_terms, formula, kind, engine, data,
                             weights, stage_args, counts, levels, totals,
                             ll_full, df_full) {
+    if (is.null(formula)) {
+      return(list(loglik = ll_full, df = df_full))
+    }
+
     # Type-II semantics: remove the term and every term containing it.
     drop_set <- .tsco_terms_containing(term, formula, user_terms)
 
